@@ -13,6 +13,7 @@ import type {
   UpdateDepartmentRequest,
   DepartmentStats,
   CalendarMonthData,
+  ReminderGroups,
 } from '../../shared/types'
 import api from '../utils/api'
 
@@ -35,6 +36,7 @@ interface AppState {
   allTaskDepartments: string[]
   templates: MeetingTemplate[]
   calendarData: CalendarMonthData | null
+  reminderGroups: ReminderGroups | null
   loading: boolean
   error: string | null
 
@@ -59,6 +61,7 @@ interface AppState {
   fetchTemplateDetail: (id: number) => Promise<MeetingTemplate | null>
   createTemplate: (data: CreateTemplateRequest) => Promise<MeetingTemplate>
   deleteTemplate: (id: number) => Promise<void>
+  fetchReminders: () => Promise<void>
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -75,6 +78,7 @@ export const useAppStore = create<AppState>((set) => ({
   allTaskDepartments: [],
   templates: [],
   calendarData: null,
+  reminderGroups: null,
   loading: false,
   error: null,
 
@@ -341,6 +345,16 @@ export const useAppStore = create<AppState>((set) => ({
     } catch (error) {
       set({ error: getErrorMessage(error), loading: false })
       throw error
+    }
+  },
+
+  fetchReminders: async () => {
+    set({ loading: true, error: null })
+    try {
+      const groups = await api.get<ReminderGroups>('/reminders')
+      set({ reminderGroups: groups, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
     }
   },
 }))

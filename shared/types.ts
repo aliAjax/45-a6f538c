@@ -123,3 +123,9 @@ export interface CalendarMonthData {
   month: number
   days: CalendarDayTasks[]
 }
+
+export interface ReminderGroups {
+  overdue: Task[]
+  today: Task[]
+  nextThreeDays: Task[]
+}

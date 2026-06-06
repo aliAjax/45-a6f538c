@@ -1,4 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom'
+import { useState, useEffect } from 'react'
 import {
   LayoutDashboard,
   FileText,
@@ -10,6 +11,8 @@ import {
   Calendar as CalendarIcon,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
+import ReminderPanel from './ReminderPanel'
+import { useAppStore } from '../store/useAppStore'
 
 const navItems = [
   { path: '/', label: '首页概览', icon: LayoutDashboard },
@@ -26,6 +29,23 @@ interface LayoutProps {
 
 export default function Layout({ children }: LayoutProps) {
   const location = useLocation()
+  const [isPanelOpen, setIsPanelOpen] = useState(false)
+  const reminderGroups = useAppStore((state) => state.reminderGroups)
+  const fetchReminders = useAppStore((state) => state.fetchReminders)
+
+  useEffect(() => {
+    fetchReminders()
+  }, [fetchReminders])
+
+  const totalReminders = reminderGroups
+    ? reminderGroups.overdue.length +
+      reminderGroups.today.length +
+      reminderGroups.nextThreeDays.length
+    : 0
+
+  const togglePanel = () => {
+    setIsPanelOpen(!isPanelOpen)
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
@@ -103,10 +123,28 @@ export default function Layout({ children }: LayoutProps) {
           </div>
 
           <div className="flex items-center gap-2 md:gap-4">
-            <button className="relative p-2 rounded-lg hover:bg-slate-100 transition-colors">
-              <Bell className="w-5 h-5 text-slate-600" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
-            </button>
+            <div className="relative">
+              <button
+                onClick={togglePanel}
+                className={cn(
+                  'relative p-2 rounded-lg transition-colors',
+                  isPanelOpen
+                    ? 'bg-primary-50 text-primary-600'
+                    : 'hover:bg-slate-100 text-slate-600'
+                )}
+              >
+                <Bell className="w-5 h-5" />
+                {totalReminders > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1">
+                    {totalReminders > 99 ? '99+' : totalReminders}
+                  </span>
+                )}
+              </button>
+              <ReminderPanel
+                isOpen={isPanelOpen}
+                onClose={() => setIsPanelOpen(false)}
+              />
+            </div>
           </div>
         </header>
 
