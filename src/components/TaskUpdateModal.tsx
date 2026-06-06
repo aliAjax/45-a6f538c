@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
-import { X, CheckCircle, Clock, AlertCircle } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { X, CheckCircle, Clock, AlertCircle, History } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
-import type { Task } from '../../shared/types'
+import type { Task, TaskProgress } from '../../shared/types'
 import { cn } from '../lib/utils'
+import ProgressTimeline from './ProgressTimeline'
 
 interface TaskUpdateModalProps {
   task: Task | null
@@ -15,16 +16,32 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
   const [progress, setProgress] = useState('')
   const [status, setStatus] = useState<Task['status']>('pending')
   const updateTask = useAppStore((state) => state.updateTask)
+  const fetchTaskProgress = useAppStore((state) => state.fetchTaskProgress)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [progressList, setProgressList] = useState<TaskProgress[]>([])
+  const [loadingProgress, setLoadingProgress] = useState(false)
+
+  const loadProgressList = useCallback(async (taskId: number) => {
+    setLoadingProgress(true)
+    try {
+      const list = await fetchTaskProgress(taskId)
+      setProgressList(list)
+    } catch (err) {
+      console.error('Failed to load progress list:', err)
+    } finally {
+      setLoadingProgress(false)
+    }
+  }, [fetchTaskProgress])
 
   useEffect(() => {
     if (task) {
       setProgress(task.progress || '')
       setStatus(task.status)
       setError('')
+      loadProgressList(task.id)
     }
-  }, [task])
+  }, [task, loadProgressList])
 
   if (!isOpen || !task) return null
 
@@ -35,6 +52,7 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
 
     try {
       await updateTask(task.id, { status, progress })
+      await loadProgressList(task.id)
       onClose()
       onUpdated?.()
     } catch (err) {
@@ -209,6 +227,27 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
               className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none transition-all"
               rows={4}
             />
+          </div>
+
+          <div className="mb-5">
+            <div className="flex items-center gap-2 mb-3">
+              <History className="w-4 h-4 text-slate-500" />
+              <span className="text-sm font-medium text-slate-700">
+                历史进展记录
+              </span>
+              <span className="text-xs text-slate-400">
+                ({progressList.length} 条)
+              </span>
+            </div>
+            {loadingProgress ? (
+              <div className="py-6 text-center text-sm text-slate-500">
+                加载中...
+              </div>
+            ) : (
+              <div className="max-h-64 overflow-y-auto pr-1">
+                <ProgressTimeline progressList={progressList} />
+              </div>
+            )}
           </div>
 
           {error && (

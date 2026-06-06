@@ -21,6 +21,14 @@ export interface Task {
   meetingTitle?: string
 }
 
+export interface TaskProgress {
+  id: number
+  taskId: number
+  status: 'pending' | 'in_progress' | 'completed'
+  progress: string
+  createdAt: string
+}
+
 export interface Stats {
   totalMeetings: number
   totalTasks: number

@@ -82,6 +82,18 @@ function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_departments_name ON departments(name);
     CREATE INDEX IF NOT EXISTS idx_departments_is_active ON departments(is_active);
     CREATE INDEX IF NOT EXISTS idx_departments_sort_order ON departments(sort_order);
+
+    CREATE TABLE IF NOT EXISTS task_progress (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      progress TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now', 'localtime')),
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_task_progress_task_id ON task_progress(task_id);
+    CREATE INDEX IF NOT EXISTS idx_task_progress_created_at ON task_progress(created_at);
   `)
 
   const meetingCount = db.prepare('SELECT COUNT(*) as count FROM meetings').get() as { count: number }
@@ -228,6 +240,43 @@ function initDatabase() {
         nextSortOrder++
       }
     })
+  }
+
+  migrateTaskProgress()
+}
+
+function migrateTaskProgress() {
+  const tasksWithoutProgress = db.prepare(`
+    SELECT t.id, t.status, t.progress, t.created_at
+    FROM tasks t
+    WHERE NOT EXISTS (
+      SELECT 1 FROM task_progress tp WHERE tp.task_id = t.id
+    )
+  `).all() as Array<{
+    id: number
+    status: string
+    progress: string | null
+    created_at: string
+  }>
+
+  if (tasksWithoutProgress.length > 0) {
+    const insertProgress = db.prepare(`
+      INSERT INTO task_progress (task_id, status, progress, created_at)
+      VALUES (?, ?, ?, ?)
+    `)
+
+    const transaction = db.transaction((tasks: typeof tasksWithoutProgress) => {
+      for (const task of tasks) {
+        insertProgress.run(
+          task.id,
+          task.status,
+          task.progress || '',
+          task.created_at
+        )
+      }
+    })
+
+    transaction(tasksWithoutProgress)
   }
 }
 

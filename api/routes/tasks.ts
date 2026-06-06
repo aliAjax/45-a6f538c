@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import db from '../db.js'
-import type { Task, UpdateTaskRequest, CalendarDayTasks } from '../../shared/types.js'
+import type { Task, TaskProgress, UpdateTaskRequest, CalendarDayTasks } from '../../shared/types.js'
 
 interface TaskRowWithTitle {
   id: number
@@ -13,6 +13,24 @@ interface TaskRowWithTitle {
   created_at: string
   updated_at: string
   meeting_title?: string
+}
+
+interface TaskProgressRow {
+  id: number
+  task_id: number
+  status: string
+  progress: string | null
+  created_at: string
+}
+
+function rowToTaskProgress(row: TaskProgressRow): TaskProgress {
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    status: row.status as TaskProgress['status'],
+    progress: row.progress || '',
+    createdAt: row.created_at,
+  }
 }
 
 const router = Router()
@@ -244,13 +262,23 @@ router.patch('/:id', (req: Request, res: Response) => {
     fields.push("updated_at = datetime('now', 'localtime')")
     values.push(Number(id))
 
-    const stmt = db.prepare(`
-      UPDATE tasks
-      SET ${fields.join(', ')}
-      WHERE id = ?
-    `)
+    const newStatus = status !== undefined ? status : taskRow.status
+    const newProgress = progress !== undefined ? progress : taskRow.progress || ''
 
-    stmt.run(...values)
+    db.transaction(() => {
+      const stmt = db.prepare(`
+        UPDATE tasks
+        SET ${fields.join(', ')}
+        WHERE id = ?
+      `)
+      stmt.run(...values)
+
+      const insertProgress = db.prepare(`
+        INSERT INTO task_progress (task_id, status, progress)
+        VALUES (?, ?, ?)
+      `)
+      insertProgress.run(Number(id), newStatus, newProgress)
+    })()
 
     const updatedRow = db.prepare(`
       SELECT t.*, m.title as meeting_title
@@ -265,6 +293,30 @@ router.patch('/:id', (req: Request, res: Response) => {
   } catch (error) {
     console.error('Update task error:', error)
     res.status(500).json({ success: false, error: '更新事项失败' })
+  }
+})
+
+router.get('/:id/progress', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+
+    const taskRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as TaskRowWithTitle | undefined
+    if (!taskRow) {
+      return res.status(404).json({ success: false, error: '事项不存在' })
+    }
+
+    const rows = db.prepare(`
+      SELECT * FROM task_progress
+      WHERE task_id = ?
+      ORDER BY created_at DESC, id DESC
+    `).all(id) as TaskProgressRow[]
+
+    const progressList = rows.map(rowToTaskProgress)
+
+    res.json({ success: true, data: progressList })
+  } catch (error) {
+    console.error('Get task progress error:', error)
+    res.status(500).json({ success: false, error: '获取进展记录失败' })
   }
 })
 

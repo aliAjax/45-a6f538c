@@ -8,11 +8,15 @@ import {
   CheckCircle,
   Edit3,
   Printer,
+  History,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import StatusBadge from '../components/StatusBadge'
 import TaskUpdateModal from '../components/TaskUpdateModal'
-import type { Meeting, Task } from '../../shared/types'
+import ProgressTimeline from '../components/ProgressTimeline'
+import type { Meeting, Task, TaskProgress } from '../../shared/types'
 
 export default function MeetingDetail() {
   const { id } = useParams<{ id: string }>()
@@ -213,6 +217,11 @@ function TaskItem({
   index: number
   onClick: () => void
 }) {
+  const fetchTaskProgress = useAppStore((state) => state.fetchTaskProgress)
+  const [expanded, setExpanded] = useState(false)
+  const [progressList, setProgressList] = useState<TaskProgress[]>([])
+  const [loadingProgress, setLoadingProgress] = useState(false)
+
   const daysLeft = getDaysLeft(task.deadline)
   const isOverdue = daysLeft < 0 && task.status !== 'completed'
   const isUrgent = daysLeft >= 0 && daysLeft <= 3 && task.status !== 'completed'
@@ -224,6 +233,22 @@ function TaskItem({
     deadlineDate.setHours(0, 0, 0, 0)
     const diff = deadlineDate.getTime() - today.getTime()
     return Math.ceil(diff / (1000 * 60 * 60 * 24))
+  }
+
+  async function handleToggleExpand(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!expanded) {
+      setLoadingProgress(true)
+      try {
+        const list = await fetchTaskProgress(task.id)
+        setProgressList(list)
+      } catch (err) {
+        console.error('Failed to load progress list:', err)
+      } finally {
+        setLoadingProgress(false)
+      }
+    }
+    setExpanded(!expanded)
   }
 
   return (
@@ -266,12 +291,30 @@ function TaskItem({
             </span>
           </div>
 
-          {task.progress && (
+          <div className="mt-3 flex items-center gap-3">
+            <button
+              onClick={handleToggleExpand}
+              className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-primary-600 transition-colors"
+            >
+              <History className="w-3.5 h-3.5" />
+              <span>历史进展 ({progressList.length || '...'})</span>
+              {expanded ? (
+                <ChevronUp className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronDown className="w-3.5 h-3.5" />
+              )}
+            </button>
+          </div>
+
+          {expanded && (
             <div className="mt-3 pt-3 border-t border-slate-200">
-              <p className="text-xs text-slate-600">
-                <span className="text-slate-400 font-medium">最新进展：</span>
-                {task.progress}
-              </p>
+              {loadingProgress ? (
+                <div className="py-4 text-center text-xs text-slate-500">
+                  加载中...
+                </div>
+              ) : (
+                <ProgressTimeline progressList={progressList} />
+              )}
             </div>
           )}
         </div>

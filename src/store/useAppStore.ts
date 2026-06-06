@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type {
   Meeting,
   Task,
+  TaskProgress,
   Stats,
   CreateMeetingRequest,
   UpdateTaskRequest,
@@ -53,6 +54,7 @@ interface AppState {
   toggleDepartmentStatus: (id: number) => Promise<Department>
   deleteDepartment: (id: number) => Promise<void>
   updateTask: (id: number, data: UpdateTaskRequest) => Promise<Task>
+  fetchTaskProgress: (taskId: number) => Promise<TaskProgress[]>
   fetchTemplates: () => Promise<void>
   fetchTemplateDetail: (id: number) => Promise<MeetingTemplate | null>
   createTemplate: (data: CreateTemplateRequest) => Promise<MeetingTemplate>
@@ -283,6 +285,16 @@ export const useAppStore = create<AppState>((set) => ({
       return task
     } catch (error) {
       set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  fetchTaskProgress: async (taskId: number) => {
+    try {
+      const progressList = await api.get<TaskProgress[]>(`/tasks/${taskId}/progress`)
+      return progressList
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
       throw error
     }
   },

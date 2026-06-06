@@ -126,12 +126,19 @@ router.post('/', (req: Request, res: Response) => {
       VALUES (?, ?, ?, ?)
     `)
 
+    const insertTaskProgress = db.prepare(`
+      INSERT INTO task_progress (task_id, status, progress, created_at)
+      VALUES (?, 'pending', '', datetime('now', 'localtime'))
+    `)
+
     const result = db.transaction(() => {
       const meetingResult = insertMeeting.run(title, departments, meetingDate)
       const meetingId = meetingResult.lastInsertRowid as number
 
       tasks.forEach(task => {
-        insertTask.run(meetingId, task.content, task.department, task.deadline)
+        const taskResult = insertTask.run(meetingId, task.content, task.department, task.deadline)
+        const taskId = taskResult.lastInsertRowid as number
+        insertTaskProgress.run(taskId)
       })
 
       return meetingId
