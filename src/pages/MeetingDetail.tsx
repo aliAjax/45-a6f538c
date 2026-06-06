@@ -7,6 +7,7 @@ import {
   FileText,
   CheckCircle,
   Edit3,
+  Printer,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import StatusBadge from '../components/StatusBadge'
@@ -82,12 +83,19 @@ export default function MeetingDetail() {
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold text-slate-800 mb-1">
             {meeting.title}
           </h1>
           <p className="text-slate-500 text-sm">会议纪要 #{meeting.id}</p>
         </div>
+        <button
+          onClick={() => navigate(`/meetings/${meeting.id}/print`)}
+          className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary-600 text-white rounded-xl hover:bg-primary-700 transition-colors shadow-sm shadow-primary-200"
+        >
+          <Printer className="w-4 h-4" />
+          <span className="text-sm font-medium">打印预览</span>
+        </button>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
