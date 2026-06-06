@@ -1,0 +1,106 @@
+import { Calendar, Building2, Clock, ChevronRight } from 'lucide-react'
+import StatusBadge from './StatusBadge'
+import { cn } from '../lib/utils'
+import type { Task } from '../../shared/types'
+
+interface TaskCardProps {
+  task: Task
+  variant?: 'default' | 'overdue' | 'this-week'
+  onClick?: () => void
+}
+
+export default function TaskCard({ task, variant = 'default', onClick }: TaskCardProps) {
+  const daysLeft = getDaysLeft(task.deadline)
+  const isOverdue = daysLeft < 0 && task.status !== 'completed'
+  const isUrgent = daysLeft >= 0 && daysLeft <= 3 && task.status !== 'completed'
+
+  function getDaysLeft(deadline: string): number {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const deadlineDate = new Date(deadline)
+    deadlineDate.setHours(0, 0, 0, 0)
+    const diff = deadlineDate.getTime() - today.getTime()
+    return Math.ceil(diff / (1000 * 60 * 60 * 24))
+  }
+
+  const deadlineText = isOverdue
+    ? `逾期 ${Math.abs(daysLeft)} 天`
+    : daysLeft === 0
+    ? '今天到期'
+    : `剩余 ${daysLeft} 天`
+
+  return (
+    <div
+      onClick={onClick}
+      className={cn(
+        'bg-white rounded-xl border p-4 transition-all duration-200 cursor-pointer group',
+        variant === 'overdue'
+          ? 'border-red-200 hover:border-red-300 hover:shadow-md hover:shadow-red-50'
+          : variant === 'this-week'
+          ? 'border-amber-200 hover:border-amber-300 hover:shadow-md hover:shadow-amber-50'
+          : 'border-slate-200 hover:border-slate-300 hover:shadow-md'
+      )}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-2">
+            <StatusBadge status={task.status} size="sm" />
+            {task.meetingTitle && (
+              <span className="text-xs text-slate-500 truncate">
+                来源：{task.meetingTitle}
+              </span>
+            )}
+          </div>
+
+          <h3 className="text-sm font-medium text-slate-800 line-clamp-2 mb-3 group-hover:text-primary-700 transition-colors">
+            {task.content}
+          </h3>
+
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+            <span className="inline-flex items-center gap-1">
+              <Building2 className="w-3.5 h-3.5" />
+              {task.department}
+            </span>
+            <span
+              className={cn(
+                'inline-flex items-center gap-1 font-medium',
+                isOverdue
+                  ? 'text-red-600'
+                  : isUrgent
+                  ? 'text-amber-600'
+                  : 'text-slate-500'
+              )}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              {task.deadline}
+            </span>
+            <span
+              className={cn(
+                'inline-flex items-center gap-1 font-medium',
+                isOverdue
+                  ? 'text-red-600'
+                  : isUrgent
+                  ? 'text-amber-600'
+                  : 'text-slate-500'
+              )}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              {deadlineText}
+            </span>
+          </div>
+        </div>
+
+        <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-primary-600 transition-colors flex-shrink-0 mt-1" />
+      </div>
+
+      {task.progress && (
+        <div className="mt-3 pt-3 border-t border-slate-100">
+          <p className="text-xs text-slate-600 line-clamp-2">
+            <span className="text-slate-400">最新进展：</span>
+            {task.progress}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}

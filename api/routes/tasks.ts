@@ -1,0 +1,195 @@
+import { Router, type Request, type Response } from 'express'
+import db from '../db.js'
+import type { Task, UpdateTaskRequest } from '../../shared/types.js'
+
+const router = Router()
+
+function rowToTask(row: any): Task {
+  return {
+    id: row.id,
+    meetingId: row.meeting_id,
+    content: row.content,
+    department: row.department,
+    deadline: row.deadline,
+    status: row.status as Task['status'],
+    progress: row.progress || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    meetingTitle: row.meeting_title,
+  }
+}
+
+function getThisWeekRange(): { start: string; end: string } {
+  const now = new Date()
+  const day = now.getDay()
+  const diff = now.getDate() - day + (day === 0 ? -6 : 1)
+  const monday = new Date(now.setDate(diff))
+  monday.setHours(0, 0, 0, 0)
+  const sunday = new Date(monday)
+  sunday.setDate(sunday.getDate() + 6)
+  sunday.setHours(23, 59, 59, 999)
+  return {
+    start: monday.toISOString().split('T')[0],
+    end: sunday.toISOString().split('T')[0],
+  }
+}
+
+router.get('/', (req: Request, res: Response) => {
+  try {
+    const { department, status, page = '1', pageSize = '20' } = req.query
+
+    let whereClause = 'WHERE 1=1'
+    const params: any[] = []
+
+    if (department && department !== 'all') {
+      whereClause += ' AND t.department = ?'
+      params.push(department)
+    }
+
+    if (status && status !== 'all') {
+      whereClause += ' AND t.status = ?'
+      params.push(status)
+    }
+
+    const countRow = db.prepare(`
+      SELECT COUNT(*) as count 
+      FROM tasks t
+      ${whereClause}
+    `).get(...params) as { count: number }
+    const total = countRow.count
+
+    const offset = (Number(page) - 1) * Number(pageSize)
+    const rows = db.prepare(`
+      SELECT t.*, m.title as meeting_title
+      FROM tasks t
+      LEFT JOIN meetings m ON t.meeting_id = m.id
+      ${whereClause}
+      ORDER BY 
+        CASE t.status 
+          WHEN 'pending' THEN 1 
+          WHEN 'in_progress' THEN 2 
+          WHEN 'completed' THEN 3 
+        END,
+        t.deadline ASC,
+        t.id DESC
+      LIMIT ? OFFSET ?
+    `).all(...params, Number(pageSize), offset) as any[]
+
+    const tasks = rows.map(rowToTask)
+
+    res.json({
+      success: true,
+      data: {
+        list: tasks,
+        total,
+        page: Number(page),
+        pageSize: Number(pageSize),
+      },
+    })
+  } catch (error) {
+    console.error('Get tasks error:', error)
+    res.status(500).json({ success: false, error: '获取待办事项失败' })
+  }
+})
+
+router.get('/overdue', (req: Request, res: Response) => {
+  try {
+    const today = new Date().toISOString().split('T')[0]
+
+    const rows = db.prepare(`
+      SELECT t.*, m.title as meeting_title
+      FROM tasks t
+      LEFT JOIN meetings m ON t.meeting_id = m.id
+      WHERE t.status != 'completed' AND t.deadline < ?
+      ORDER BY t.deadline ASC, t.id DESC
+    `).all(today) as any[]
+
+    const tasks = rows.map(rowToTask)
+
+    res.json({ success: true, data: tasks })
+  } catch (error) {
+    console.error('Get overdue tasks error:', error)
+    res.status(500).json({ success: false, error: '获取逾期事项失败' })
+  }
+})
+
+router.get('/this-week', (req: Request, res: Response) => {
+  try {
+    const { start, end } = getThisWeekRange()
+    const today = new Date().toISOString().split('T')[0]
+
+    const rows = db.prepare(`
+      SELECT t.*, m.title as meeting_title
+      FROM tasks t
+      LEFT JOIN meetings m ON t.meeting_id = m.id
+      WHERE t.status != 'completed' 
+        AND t.deadline >= ? 
+        AND t.deadline <= ?
+        AND t.deadline >= ?
+      ORDER BY t.deadline ASC, t.id DESC
+    `).all(start, end, today) as any[]
+
+    const tasks = rows.map(rowToTask)
+
+    res.json({ success: true, data: tasks })
+  } catch (error) {
+    console.error('Get this week tasks error:', error)
+    res.status(500).json({ success: false, error: '获取本周到期事项失败' })
+  }
+})
+
+router.patch('/:id', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const { status, progress } = req.body as UpdateTaskRequest
+
+    const taskRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as any
+    if (!taskRow) {
+      return res.status(404).json({ success: false, error: '事项不存在' })
+    }
+
+    const fields: string[] = []
+    const values: any[] = []
+
+    if (status !== undefined) {
+      fields.push('status = ?')
+      values.push(status)
+    }
+
+    if (progress !== undefined) {
+      fields.push('progress = ?')
+      values.push(progress)
+    }
+
+    if (fields.length === 0) {
+      return res.status(400).json({ success: false, error: '没有需要更新的字段' })
+    }
+
+    fields.push("updated_at = datetime('now', 'localtime')")
+    values.push(id)
+
+    const stmt = db.prepare(`
+      UPDATE tasks 
+      SET ${fields.join(', ')}
+      WHERE id = ?
+    `)
+
+    stmt.run(...values)
+
+    const updatedRow = db.prepare(`
+      SELECT t.*, m.title as meeting_title
+      FROM tasks t
+      LEFT JOIN meetings m ON t.meeting_id = m.id
+      WHERE t.id = ?
+    `).get(id) as any
+
+    const task = rowToTask(updatedRow)
+
+    res.json({ success: true, data: task })
+  } catch (error) {
+    console.error('Update task error:', error)
+    res.status(500).json({ success: false, error: '更新事项失败' })
+  }
+})
+
+export default router
