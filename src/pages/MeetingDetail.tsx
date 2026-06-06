@@ -16,6 +16,7 @@ import { useAppStore } from '../store/useAppStore'
 import StatusBadge from '../components/StatusBadge'
 import TaskUpdateModal from '../components/TaskUpdateModal'
 import ProgressTimeline from '../components/ProgressTimeline'
+import { cn } from '../lib/utils'
 import type { Meeting, Task, TaskProgress } from '../../shared/types'
 
 export default function MeetingDetail() {
@@ -291,7 +292,16 @@ function TaskItem({
             </span>
           </div>
 
-          <div className="mt-3 flex items-center gap-3">
+          {task.progress && (
+            <div className="mt-3 pt-3 border-t border-slate-200">
+              <p className="text-xs text-slate-600 line-clamp-2">
+                <span className="text-slate-400 font-medium">最新进展：</span>
+                {task.progress}
+              </p>
+            </div>
+          )}
+
+          <div className={cn("flex items-center gap-3", task.progress ? "mt-3" : "mt-3 pt-3 border-t border-slate-200")}>
             <button
               onClick={handleToggleExpand}
               className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-primary-600 transition-colors"
