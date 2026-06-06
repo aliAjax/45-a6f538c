@@ -201,8 +201,8 @@ function initDatabase() {
     })
 
     const taskDepts = db.prepare(`
-      SELECT DISTINCT department 
-      FROM tasks 
+      SELECT DISTINCT department
+      FROM tasks
       WHERE department NOT IN (SELECT name FROM departments)
       ORDER BY department ASC
     `).all() as { department: string }[]
@@ -216,8 +216,8 @@ function initDatabase() {
     })
 
     const templateDepts = db.prepare(`
-      SELECT DISTINCT department 
-      FROM template_tasks 
+      SELECT DISTINCT department
+      FROM template_tasks
       WHERE department NOT IN (SELECT name FROM departments)
       ORDER BY department ASC
     `).all() as { department: string }[]

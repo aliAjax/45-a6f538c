@@ -18,8 +18,8 @@ function rowToDepartment(row: any): Department {
 router.get('/', (_req: Request, res: Response) => {
   try {
     const rows = db.prepare(`
-      SELECT * 
-      FROM departments 
+      SELECT *
+      FROM departments
       ORDER BY sort_order ASC, id ASC
     `).all() as any[]
 
@@ -35,8 +35,8 @@ router.get('/', (_req: Request, res: Response) => {
 router.get('/active', (_req: Request, res: Response) => {
   try {
     const rows = db.prepare(`
-      SELECT * 
-      FROM departments 
+      SELECT *
+      FROM departments
       WHERE is_active = 1
       ORDER BY sort_order ASC, id ASC
     `).all() as any[]
@@ -136,7 +136,7 @@ router.put('/:id', (req: Request, res: Response) => {
     const finalIsActive = isActive !== undefined ? (isActive ? 1 : 0) : current.is_active
 
     db.prepare(`
-      UPDATE departments 
+      UPDATE departments
       SET name = ?, sort_order = ?, is_active = ?, updated_at = datetime('now', 'localtime')
       WHERE id = ?
     `).run(finalName, finalSortOrder, finalIsActive, id)
@@ -164,7 +164,7 @@ router.patch('/:id/toggle', (req: Request, res: Response) => {
     const newIsActive = existing.is_active === 1 ? 0 : 1
 
     db.prepare(`
-      UPDATE departments 
+      UPDATE departments
       SET is_active = ?, updated_at = datetime('now', 'localtime')
       WHERE id = ?
     `).run(newIsActive, id)
@@ -211,7 +211,7 @@ router.get('/stats/tasks', (_req: Request, res: Response) => {
     const today = new Date().toISOString().split('T')[0]
 
     const rows = db.prepare(`
-      SELECT 
+      SELECT
         t.department,
         COUNT(*) as total,
         SUM(CASE WHEN t.status = 'pending' THEN 1 ELSE 0 END) as pending,
@@ -220,7 +220,7 @@ router.get('/stats/tasks', (_req: Request, res: Response) => {
         SUM(CASE WHEN t.status != 'completed' AND t.deadline < ? THEN 1 ELSE 0 END) as overdue
       FROM tasks t
       GROUP BY t.department
-      ORDER BY 
+      ORDER BY
         (SELECT COALESCE(sort_order, 9999) FROM departments d WHERE d.name = t.department) ASC,
         t.department ASC
     `).all(today) as any[]

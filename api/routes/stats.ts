@@ -29,16 +29,16 @@ router.get('/', (_req: Request, res: Response) => {
     const completedCount = db.prepare("SELECT COUNT(*) as count FROM tasks WHERE status = 'completed'").get() as { count: number }
 
     const overdueCount = db.prepare(`
-      SELECT COUNT(*) as count 
-      FROM tasks 
+      SELECT COUNT(*) as count
+      FROM tasks
       WHERE status != 'completed' AND deadline < ?
     `).get(today) as { count: number }
 
     const dueThisWeekCount = db.prepare(`
-      SELECT COUNT(*) as count 
-      FROM tasks 
-      WHERE status != 'completed' 
-        AND deadline >= ? 
+      SELECT COUNT(*) as count
+      FROM tasks
+      WHERE status != 'completed'
+        AND deadline >= ?
         AND deadline <= ?
         AND deadline >= ?
     `).get(start, end, today) as { count: number }

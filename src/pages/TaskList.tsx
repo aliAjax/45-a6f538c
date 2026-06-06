@@ -10,8 +10,10 @@ import TaskCard from '../components/TaskCard'
 import TaskUpdateModal from '../components/TaskUpdateModal'
 import type { Task } from '../../shared/types'
 import { cn } from '../lib/utils'
+import { useSearchParams } from 'react-router-dom'
 
 export default function TaskList() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const {
     tasks,
     tasksTotal,
@@ -22,8 +24,11 @@ export default function TaskList() {
     fetchDepartmentTaskStats,
   } = useAppStore()
 
-  const [selectedDepartment, setSelectedDepartment] = useState('all')
-  const [selectedStatus, setSelectedStatus] = useState('all')
+  const urlDepartment = searchParams.get('department') || 'all'
+  const urlStatus = searchParams.get('status') || 'all'
+
+  const [selectedDepartment, setSelectedDepartment] = useState(urlDepartment)
+  const [selectedStatus, setSelectedStatus] = useState(urlStatus)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [showDeptDropdown, setShowDeptDropdown] = useState(false)
@@ -34,8 +39,40 @@ export default function TaskList() {
   }, [fetchDepartments, fetchDepartmentTaskStats])
 
   useEffect(() => {
+    if (urlDepartment !== selectedDepartment) {
+      setSelectedDepartment(urlDepartment)
+    }
+    if (urlStatus !== selectedStatus) {
+      setSelectedStatus(urlStatus)
+    }
+  }, [urlDepartment, urlStatus])
+
+  useEffect(() => {
     fetchTasks(selectedDepartment, selectedStatus, 1, 50)
   }, [fetchTasks, selectedDepartment, selectedStatus])
+
+  const handleDepartmentChange = (dept: string) => {
+    setSelectedDepartment(dept)
+    setShowDeptDropdown(false)
+    const params = new URLSearchParams(searchParams)
+    if (dept === 'all') {
+      params.delete('department')
+    } else {
+      params.set('department', dept)
+    }
+    setSearchParams(params)
+  }
+
+  const handleStatusChange = (status: string) => {
+    setSelectedStatus(status)
+    const params = new URLSearchParams(searchParams)
+    if (status === 'all') {
+      params.delete('status')
+    } else {
+      params.set('status', status)
+    }
+    setSearchParams(params)
+  }
 
   const handleTaskClick = (task: Task) => {
     setSelectedTask(task)
@@ -97,10 +134,7 @@ export default function TaskList() {
                   {allDepartments.map((dept) => (
                     <button
                       key={dept}
-                      onClick={() => {
-                        setSelectedDepartment(dept)
-                        setShowDeptDropdown(false)
-                      }}
+                      onClick={() => handleDepartmentChange(dept)}
                       className={cn(
                         'w-full px-4 py-2.5 text-left text-sm transition-colors',
                         selectedDepartment === dept
@@ -129,7 +163,7 @@ export default function TaskList() {
             {statusOptions.map((option) => (
               <button
                 key={option.value}
-                onClick={() => setSelectedStatus(option.value)}
+                onClick={() => handleStatusChange(option.value)}
                 className={cn(
                   'px-3.5 py-1.5 text-sm font-medium rounded-lg transition-all',
                   selectedStatus === option.value
@@ -160,7 +194,7 @@ export default function TaskList() {
             return (
               <button
                 key={dept}
-                onClick={() => setSelectedDepartment(dept)}
+                onClick={() => handleDepartmentChange(dept)}
                 className={cn(
                   'px-4 py-2 rounded-xl text-sm font-medium transition-all',
                   selectedDepartment === dept

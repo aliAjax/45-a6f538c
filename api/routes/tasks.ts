@@ -65,7 +65,7 @@ router.get('/', (req: Request, res: Response) => {
     }
 
     const countRow = db.prepare(`
-      SELECT COUNT(*) as count 
+      SELECT COUNT(*) as count
       FROM tasks t
       ${whereClause}
     `).get(...params) as { count: number }
@@ -77,11 +77,11 @@ router.get('/', (req: Request, res: Response) => {
       FROM tasks t
       LEFT JOIN meetings m ON t.meeting_id = m.id
       ${whereClause}
-      ORDER BY 
-        CASE t.status 
-          WHEN 'pending' THEN 1 
-          WHEN 'in_progress' THEN 2 
-          WHEN 'completed' THEN 3 
+      ORDER BY
+        CASE t.status
+          WHEN 'pending' THEN 1
+          WHEN 'in_progress' THEN 2
+          WHEN 'completed' THEN 3
         END,
         t.deadline ASC,
         t.id DESC
@@ -135,8 +135,8 @@ router.get('/this-week', (_req: Request, res: Response) => {
       SELECT t.*, m.title as meeting_title
       FROM tasks t
       LEFT JOIN meetings m ON t.meeting_id = m.id
-      WHERE t.status != 'completed' 
-        AND t.deadline >= ? 
+      WHERE t.status != 'completed'
+        AND t.deadline >= ?
         AND t.deadline <= ?
         AND t.deadline >= ?
       ORDER BY t.deadline ASC, t.id DESC
@@ -182,7 +182,7 @@ router.patch('/:id', (req: Request, res: Response) => {
     values.push(Number(id))
 
     const stmt = db.prepare(`
-      UPDATE tasks 
+      UPDATE tasks
       SET ${fields.join(', ')}
       WHERE id = ?
     `)
