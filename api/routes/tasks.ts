@@ -162,13 +162,11 @@ router.get('/calendar', (req: Request, res: Response) => {
     const y = Number(year)
     const m = Number(month)
 
-    const firstDay = new Date(y, m - 1, 1)
-    const lastDay = new Date(y, m, 0)
+    const daysInMonth = new Date(y, m, 0).getDate()
+    const startDate = `${y}-${String(m).padStart(2, '0')}-01`
+    const endDate = `${y}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`
 
-    const startDate = firstDay.toISOString().split('T')[0]
-    const endDate = lastDay.toISOString().split('T')[0]
-
-    let whereClause = `WHERE t.status != 'completed' AND t.deadline >= ? AND t.deadline <= ?`
+    let whereClause = `WHERE t.status != 'completed' AND date(t.deadline) >= date(?) AND date(t.deadline) <= date(?)`
     const params: (string | number)[] = [startDate, endDate]
 
     if (department && department !== 'all') {
@@ -188,13 +186,13 @@ router.get('/calendar', (req: Request, res: Response) => {
 
     const daysMap = new Map<string, CalendarDayTasks>()
 
-    for (let d = 1; d <= lastDay.getDate(); d++) {
+    for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
       daysMap.set(dateStr, { date: dateStr, tasks: [] })
     }
 
     tasks.forEach((task) => {
-      const deadlineDate = task.deadline.split('T')[0]
+      const deadlineDate = task.deadline.split('T')[0].split(' ')[0]
       if (daysMap.has(deadlineDate)) {
         daysMap.get(deadlineDate)!.tasks.push(task)
       }

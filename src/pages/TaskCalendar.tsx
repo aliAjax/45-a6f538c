@@ -112,7 +112,7 @@ export default function TaskCalendar() {
       })
     }
 
-    const todayStr = today.toISOString().split('T')[0]
+    const todayStr = formatDateLocal(today)
 
     for (let i = 0; i < daysInMonth; i++) {
       const dayData = calendarData.days[i]
@@ -142,12 +142,17 @@ export default function TaskCalendar() {
     return cells
   }
 
+  const formatDateLocal = (date: Date) => {
+    const y = date.getFullYear()
+    const m = String(date.getMonth() + 1).padStart(2, '0')
+    const d = String(date.getDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+
   const isOverdue = (deadline: string) => {
-    const todayDate = new Date()
-    todayDate.setHours(0, 0, 0, 0)
-    const deadlineDate = new Date(deadline)
-    deadlineDate.setHours(0, 0, 0, 0)
-    return deadlineDate < todayDate
+    const todayStr = formatDateLocal(new Date())
+    const deadlineStr = deadline.split('T')[0].split(' ')[0]
+    return deadlineStr < todayStr
   }
 
   const allDepartments = ['all', ...allTaskDepartments]
