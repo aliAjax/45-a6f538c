@@ -7,7 +7,7 @@ import {
   Bell,
   LayoutTemplate,
   Building2,
-  Settings,
+  Calendar as CalendarIcon,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 
@@ -15,6 +15,7 @@ const navItems = [
   { path: '/', label: '首页概览', icon: LayoutDashboard },
   { path: '/meetings', label: '会议纪要', icon: FileText },
   { path: '/tasks', label: '待办事项', icon: CheckSquare },
+  { path: '/calendar', label: '任务日历', icon: CalendarIcon },
   { path: '/templates', label: '模板库', icon: LayoutTemplate },
   { path: '/departments', label: '科室管理', icon: Building2 },
 ]
@@ -28,7 +29,7 @@ export default function Layout({ children }: LayoutProps) {
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
-      <aside className="w-64 bg-white border-r border-slate-200 flex flex-col fixed h-full z-20">
+      <aside className="hidden md:flex w-64 bg-white border-r border-slate-200 flex-col fixed h-full z-20">
         <div className="h-16 flex items-center px-6 border-b border-slate-200">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary-600 to-primary-800 flex items-center justify-center shadow-lg shadow-primary-200">
@@ -85,10 +86,13 @@ export default function Layout({ children }: LayoutProps) {
         </div>
       </aside>
 
-      <div className="flex-1 ml-64 flex flex-col min-h-screen">
-        <header className="h-16 bg-white border-b border-slate-200 sticky top-0 z-10 flex items-center justify-between px-6">
-          <div className="flex items-center gap-2 text-sm text-slate-500">
-            <span className="text-slate-400">
+      <div className="flex-1 md:ml-64 flex flex-col min-h-screen">
+        <header className="h-16 bg-white border-b border-slate-200 sticky top-0 z-10 flex items-center justify-between px-4 md:px-6">
+          <div className="flex items-center gap-2">
+            <h1 className="text-base font-semibold text-slate-800 md:hidden">
+              会议纪要系统
+            </h1>
+            <span className="hidden md:inline text-sm text-slate-500">
               {new Date().toLocaleDateString('zh-CN', {
                 year: 'numeric',
                 month: 'long',
@@ -98,7 +102,7 @@ export default function Layout({ children }: LayoutProps) {
             </span>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 md:gap-4">
             <button className="relative p-2 rounded-lg hover:bg-slate-100 transition-colors">
               <Bell className="w-5 h-5 text-slate-600" />
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
@@ -106,7 +110,35 @@ export default function Layout({ children }: LayoutProps) {
           </div>
         </header>
 
-        <main className="flex-1 p-6">{children}</main>
+        <main className="flex-1 p-4 md:p-6 pb-20 md:pb-6">{children}</main>
+
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 z-20 px-2 py-2">
+          <div className="flex items-center justify-around">
+            {navItems.slice(0, 5).map((item) => {
+              const Icon = item.icon
+              const isActive =
+                item.path === '/'
+                  ? location.pathname === '/'
+                  : location.pathname.startsWith(item.path)
+
+              return (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  className={cn(
+                    'flex flex-col items-center gap-1 px-3 py-1.5 rounded-lg transition-all duration-200 min-w-[60px]',
+                    isActive
+                      ? 'text-primary-600'
+                      : 'text-slate-500'
+                  )}
+                >
+                  <Icon className="w-5 h-5" strokeWidth={isActive ? 2.2 : 1.8} />
+                  <span className="text-[10px] font-medium">{item.label}</span>
+                </NavLink>
+              )
+            })}
+          </div>
+        </nav>
       </div>
     </div>
   )

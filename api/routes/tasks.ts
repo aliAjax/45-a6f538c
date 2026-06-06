@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import db from '../db.js'
-import type { Task, UpdateTaskRequest } from '../../shared/types.js'
+import type { Task, UpdateTaskRequest, CalendarDayTasks } from '../../shared/types.js'
 
 interface TaskRowWithTitle {
   id: number
@@ -148,6 +148,71 @@ router.get('/this-week', (_req: Request, res: Response) => {
   } catch (error) {
     console.error('Get this week tasks error:', error)
     res.status(500).json({ success: false, error: '获取本周到期事项失败' })
+  }
+})
+
+router.get('/calendar', (req: Request, res: Response) => {
+  try {
+    const { year, month, department = 'all' } = req.query
+
+    if (!year || !month) {
+      return res.status(400).json({ success: false, error: '年份和月份不能为空' })
+    }
+
+    const y = Number(year)
+    const m = Number(month)
+
+    const firstDay = new Date(y, m - 1, 1)
+    const lastDay = new Date(y, m, 0)
+
+    const startDate = firstDay.toISOString().split('T')[0]
+    const endDate = lastDay.toISOString().split('T')[0]
+
+    let whereClause = `WHERE t.status != 'completed' AND t.deadline >= ? AND t.deadline <= ?`
+    const params: (string | number)[] = [startDate, endDate]
+
+    if (department && department !== 'all') {
+      whereClause += ' AND t.department = ?'
+      params.push(department as string)
+    }
+
+    const rows = db.prepare(`
+      SELECT t.*, m.title as meeting_title
+      FROM tasks t
+      LEFT JOIN meetings m ON t.meeting_id = m.id
+      ${whereClause}
+      ORDER BY t.deadline ASC, t.id DESC
+    `).all(...params) as TaskRowWithTitle[]
+
+    const tasks = rows.map(rowToTask)
+
+    const daysMap = new Map<string, CalendarDayTasks>()
+
+    for (let d = 1; d <= lastDay.getDate(); d++) {
+      const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+      daysMap.set(dateStr, { date: dateStr, tasks: [] })
+    }
+
+    tasks.forEach((task) => {
+      const deadlineDate = task.deadline.split('T')[0]
+      if (daysMap.has(deadlineDate)) {
+        daysMap.get(deadlineDate)!.tasks.push(task)
+      }
+    })
+
+    const days: CalendarDayTasks[] = Array.from(daysMap.values())
+
+    res.json({
+      success: true,
+      data: {
+        year: y,
+        month: m,
+        days,
+      },
+    })
+  } catch (error) {
+    console.error('Get calendar tasks error:', error)
+    res.status(500).json({ success: false, error: '获取日历事项失败' })
   }
 })
 

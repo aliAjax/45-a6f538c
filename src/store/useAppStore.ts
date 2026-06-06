@@ -11,6 +11,7 @@ import type {
   CreateDepartmentRequest,
   UpdateDepartmentRequest,
   DepartmentStats,
+  CalendarMonthData,
 } from '../../shared/types'
 import api from '../utils/api'
 
@@ -32,6 +33,7 @@ interface AppState {
   departmentTaskStats: DepartmentStats[]
   allTaskDepartments: string[]
   templates: MeetingTemplate[]
+  calendarData: CalendarMonthData | null
   loading: boolean
   error: string | null
 
@@ -42,6 +44,7 @@ interface AppState {
   fetchTasks: (department?: string, status?: string, page?: number, pageSize?: number) => Promise<void>
   fetchOverdueTasks: () => Promise<void>
   fetchThisWeekTasks: () => Promise<void>
+  fetchCalendarTasks: (year: number, month: number, department?: string) => Promise<void>
   fetchDepartments: () => Promise<void>
   fetchAllDepartments: () => Promise<void>
   fetchDepartmentTaskStats: () => Promise<void>
@@ -69,6 +72,7 @@ export const useAppStore = create<AppState>((set) => ({
   departmentTaskStats: [],
   allTaskDepartments: [],
   templates: [],
+  calendarData: null,
   loading: false,
   error: null,
 
@@ -152,6 +156,21 @@ export const useAppStore = create<AppState>((set) => ({
     try {
       const tasks = await api.get<Task[]>('/tasks/this-week')
       set({ thisWeekTasks: tasks, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+    }
+  },
+
+  fetchCalendarTasks: async (year: number, month: number, department = 'all') => {
+    set({ loading: true, error: null })
+    try {
+      const params = new URLSearchParams({
+        year: String(year),
+        month: String(month),
+        department,
+      })
+      const data = await api.get<CalendarMonthData>(`/tasks/calendar?${params}`)
+      set({ calendarData: data, loading: false })
     } catch (error) {
       set({ error: getErrorMessage(error), loading: false })
     }

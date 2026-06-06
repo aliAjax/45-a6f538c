@@ -104,3 +104,14 @@ export interface DepartmentStats {
   completed: number
   overdue: number
 }
+
+export interface CalendarDayTasks {
+  date: string
+  tasks: Task[]
+}
+
+export interface CalendarMonthData {
+  year: number
+  month: number
+  days: CalendarDayTasks[]
+}
