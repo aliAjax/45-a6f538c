@@ -95,3 +95,12 @@ export interface UpdateDepartmentRequest {
   sortOrder?: number
   isActive?: boolean
 }
+
+export interface DepartmentStats {
+  department: string
+  total: number
+  pending: number
+  inProgress: number
+  completed: number
+  overdue: number
+}

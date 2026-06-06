@@ -16,8 +16,10 @@ export default function TaskList() {
     tasks,
     tasksTotal,
     departments,
+    allTaskDepartments,
     fetchTasks,
     fetchDepartments,
+    fetchDepartmentTaskStats,
   } = useAppStore()
 
   const [selectedDepartment, setSelectedDepartment] = useState('all')
@@ -28,7 +30,8 @@ export default function TaskList() {
 
   useEffect(() => {
     fetchDepartments()
-  }, [fetchDepartments])
+    fetchDepartmentTaskStats()
+  }, [fetchDepartments, fetchDepartmentTaskStats])
 
   useEffect(() => {
     fetchTasks(selectedDepartment, selectedStatus, 1, 50)
@@ -43,7 +46,9 @@ export default function TaskList() {
     fetchTasks(selectedDepartment, selectedStatus, 1, 50)
   }
 
-  const allDepartments = ['all', ...departments]
+  const allDepartments = ['all', ...allTaskDepartments]
+
+  const isDeptActive = (dept: string) => dept === 'all' || departments.includes(dept)
 
   const statusOptions = [
     { value: 'all', label: '全部状态' },
@@ -100,10 +105,19 @@ export default function TaskList() {
                         'w-full px-4 py-2.5 text-left text-sm transition-colors',
                         selectedDepartment === dept
                           ? 'bg-primary-50 text-primary-700 font-medium'
-                          : 'text-slate-700 hover:bg-slate-50'
+                          : isDeptActive(dept)
+                          ? 'text-slate-700 hover:bg-slate-50'
+                          : 'text-slate-400 hover:bg-slate-50'
                       )}
                     >
-                      {dept === 'all' ? '全部科室' : dept}
+                      <span className="flex items-center gap-2">
+                        {dept === 'all' ? '全部科室' : dept}
+                        {!isDeptActive(dept) && dept !== 'all' && (
+                          <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded">
+                            已停用
+                          </span>
+                        )}
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -135,13 +149,14 @@ export default function TaskList() {
         </div>
       </div>
 
-      {departments.length > 0 && (
+      {allTaskDepartments.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          {['all', ...departments].map((dept) => {
+          {['all', ...allTaskDepartments].map((dept) => {
             const count =
               dept === 'all'
                 ? tasksTotal
                 : tasks.filter((t) => t.department === dept).length
+            const active = isDeptActive(dept)
             return (
               <button
                 key={dept}
@@ -150,19 +165,26 @@ export default function TaskList() {
                   'px-4 py-2 rounded-xl text-sm font-medium transition-all',
                   selectedDepartment === dept
                     ? 'bg-primary-600 text-white shadow-sm shadow-primary-200'
-                    : 'bg-white border border-slate-200 text-slate-700 hover:border-slate-300'
+                    : active
+                    ? 'bg-white border border-slate-200 text-slate-700 hover:border-slate-300'
+                    : 'bg-white border border-dashed border-slate-300 text-slate-500 hover:border-slate-400'
                 )}
               >
-                {dept === 'all' ? '全部' : dept}
-                <span
-                  className={cn(
-                    'ml-2 px-2 py-0.5 rounded-full text-xs',
-                    selectedDepartment === dept
-                      ? 'bg-white/20 text-white'
-                      : 'bg-slate-100 text-slate-600'
+                <span className="flex items-center gap-1.5">
+                  {dept === 'all' ? '全部' : dept}
+                  {!active && dept !== 'all' && (
+                    <span className="text-[10px] opacity-70">(停用)</span>
                   )}
-                >
-                  {count}
+                  <span
+                    className={cn(
+                      'ml-1 px-2 py-0.5 rounded-full text-xs',
+                      selectedDepartment === dept
+                        ? 'bg-white/20 text-white'
+                        : 'bg-slate-100 text-slate-600'
+                    )}
+                  >
+                    {count}
+                  </span>
                 </span>
               </button>
             )

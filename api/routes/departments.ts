@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import db from '../db.js'
-import type { Department, CreateDepartmentRequest, UpdateDepartmentRequest } from '../../shared/types.js'
+import type { Department, CreateDepartmentRequest, UpdateDepartmentRequest, DepartmentStats } from '../../shared/types.js'
 
 const router = Router()
 
@@ -203,6 +203,41 @@ router.delete('/:id', (req: Request, res: Response) => {
   } catch (error) {
     console.error('Delete department error:', error)
     res.status(500).json({ success: false, error: '删除科室失败' })
+  }
+})
+
+router.get('/stats/tasks', (_req: Request, res: Response) => {
+  try {
+    const today = new Date().toISOString().split('T')[0]
+
+    const rows = db.prepare(`
+      SELECT 
+        t.department,
+        COUNT(*) as total,
+        SUM(CASE WHEN t.status = 'pending' THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN t.status = 'in_progress' THEN 1 ELSE 0 END) as in_progress,
+        SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN t.status != 'completed' AND t.deadline < ? THEN 1 ELSE 0 END) as overdue
+      FROM tasks t
+      GROUP BY t.department
+      ORDER BY 
+        (SELECT COALESCE(sort_order, 9999) FROM departments d WHERE d.name = t.department) ASC,
+        t.department ASC
+    `).all(today) as any[]
+
+    const stats: DepartmentStats[] = rows.map((row) => ({
+      department: row.department,
+      total: row.total,
+      pending: row.pending,
+      inProgress: row.in_progress,
+      completed: row.completed,
+      overdue: row.overdue,
+    }))
+
+    res.json({ success: true, data: stats })
+  } catch (error) {
+    console.error('Get department task stats error:', error)
+    res.status(500).json({ success: false, error: '获取科室任务统计失败' })
   }
 })
 

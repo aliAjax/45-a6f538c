@@ -10,6 +10,7 @@ import type {
   Department,
   CreateDepartmentRequest,
   UpdateDepartmentRequest,
+  DepartmentStats,
 } from '../../shared/types'
 import api from '../utils/api'
 
@@ -28,6 +29,8 @@ interface AppState {
   thisWeekTasks: Task[]
   departments: string[]
   departmentList: Department[]
+  departmentTaskStats: DepartmentStats[]
+  allTaskDepartments: string[]
   templates: MeetingTemplate[]
   loading: boolean
   error: string | null
@@ -41,6 +44,7 @@ interface AppState {
   fetchThisWeekTasks: () => Promise<void>
   fetchDepartments: () => Promise<void>
   fetchAllDepartments: () => Promise<void>
+  fetchDepartmentTaskStats: () => Promise<void>
   createDepartment: (data: CreateDepartmentRequest) => Promise<Department>
   updateDepartment: (id: number, data: UpdateDepartmentRequest) => Promise<Department>
   toggleDepartmentStatus: (id: number) => Promise<Department>
@@ -62,6 +66,8 @@ export const useAppStore = create<AppState>((set) => ({
   thisWeekTasks: [],
   departments: [],
   departmentList: [],
+  departmentTaskStats: [],
+  allTaskDepartments: [],
   templates: [],
   loading: false,
   error: null,
@@ -172,6 +178,16 @@ export const useAppStore = create<AppState>((set) => ({
     }
   },
 
+  fetchDepartmentTaskStats: async () => {
+    try {
+      const stats = await api.get<DepartmentStats[]>('/departments/stats/tasks')
+      const allTaskDepartments = stats.map((s) => s.department)
+      set({ departmentTaskStats: stats, allTaskDepartments })
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+    }
+  },
+
   createDepartment: async (data: CreateDepartmentRequest) => {
     set({ loading: true, error: null })
     try {
@@ -210,7 +226,7 @@ export const useAppStore = create<AppState>((set) => ({
 
   toggleDepartmentStatus: async (id: number) => {
     try {
-      const dept = await api.patch<Department>(`/departments/${id}/toggle`)
+      const dept = await api.patch<Department>(`/departments/${id}/toggle`, {})
       set((state) => {
         const newList = state.departmentList
           .map((d) => (d.id === id ? dept : d))

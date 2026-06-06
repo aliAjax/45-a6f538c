@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Clock,
   ArrowRight,
+  Building2,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import StatCard from '../components/StatCard'
@@ -12,6 +13,7 @@ import TaskCard from '../components/TaskCard'
 import TaskUpdateModal from '../components/TaskUpdateModal'
 import type { Task } from '../../shared/types'
 import { useNavigate } from 'react-router-dom'
+import { cn } from '../lib/utils'
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -19,9 +21,13 @@ export default function Dashboard() {
     stats,
     overdueTasks,
     thisWeekTasks,
+    departmentTaskStats,
+    departments,
     fetchStats,
     fetchOverdueTasks,
     fetchThisWeekTasks,
+    fetchDepartmentTaskStats,
+    fetchDepartments,
   } = useAppStore()
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
@@ -31,7 +37,9 @@ export default function Dashboard() {
     fetchStats()
     fetchOverdueTasks()
     fetchThisWeekTasks()
-  }, [fetchStats, fetchOverdueTasks, fetchThisWeekTasks])
+    fetchDepartmentTaskStats()
+    fetchDepartments()
+  }, [fetchStats, fetchOverdueTasks, fetchThisWeekTasks, fetchDepartmentTaskStats, fetchDepartments])
 
   const handleTaskClick = (task: Task) => {
     setSelectedTask(task)
@@ -178,6 +186,106 @@ export default function Dashboard() {
         onClose={() => setModalOpen(false)}
         onUpdated={handleUpdated}
       />
+
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center">
+              <Building2 className="w-5 h-5 text-indigo-600" />
+            </div>
+            <div>
+              <h2 className="font-semibold text-slate-800">科室任务统计</h2>
+              <p className="text-xs text-slate-500">
+                共 {departmentTaskStats.length} 个科室有任务
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => navigate('/tasks')}
+            className="text-sm text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1 transition-colors"
+          >
+            查看全部
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-4">
+          {departmentTaskStats.length === 0 ? (
+            <div className="py-12 text-center">
+              <div className="w-16 h-16 rounded-full bg-slate-50 flex items-center justify-center mx-auto mb-3">
+                <Building2 className="w-8 h-8 text-slate-400" />
+              </div>
+              <p className="text-slate-500 text-sm">暂无科室任务数据</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {departmentTaskStats.map((stat) => {
+                const isActive = departments.includes(stat.department)
+                const activeCount = stat.total - stat.completed
+                const completedRate = stat.total > 0
+                  ? Math.round((stat.completed / stat.total) * 100)
+                  : 0
+
+                return (
+                  <button
+                    key={stat.department}
+                    onClick={() => navigate(`/tasks?department=${encodeURIComponent(stat.department)}`)}
+                    className="w-full text-left p-4 rounded-xl border border-slate-100 hover:border-slate-200 hover:bg-slate-50/50 transition-all group"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className={cn(
+                          'font-medium text-sm',
+                          isActive ? 'text-slate-800' : 'text-slate-400'
+                        )}>
+                          {stat.department}
+                        </span>
+                        {!isActive && (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded">
+                            已停用
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs text-slate-400 group-hover:text-indigo-500 transition-colors">
+                        共 {stat.total} 项
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-4 text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-violet-500"></span>
+                        <span className="text-slate-500">待办理</span>
+                        <span className="font-medium text-slate-700">{stat.pending}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                        <span className="text-slate-500">进行中</span>
+                        <span className="font-medium text-slate-700">{stat.inProgress}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                        <span className="text-slate-500">逾期</span>
+                        <span className="font-medium text-red-600">{stat.overdue}</span>
+                      </div>
+                      <div className="ml-auto flex items-center gap-1.5">
+                        <span className="text-slate-500">完成率</span>
+                        <span className="font-medium text-green-600">{completedRate}%</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-green-400 to-green-500 rounded-full transition-all"
+                        style={{ width: `${completedRate}%` }}
+                      />
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
