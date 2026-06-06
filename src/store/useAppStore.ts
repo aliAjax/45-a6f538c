@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Meeting, Task, Stats, CreateMeetingRequest, UpdateTaskRequest } from '../../shared/types'
+import type { Meeting, Task, Stats, CreateMeetingRequest, UpdateTaskRequest, MeetingTemplate, CreateTemplateRequest } from '../../shared/types'
 import api from '../utils/api'
 
 function getErrorMessage(error: unknown): string {
@@ -16,6 +16,7 @@ interface AppState {
   overdueTasks: Task[]
   thisWeekTasks: Task[]
   departments: string[]
+  templates: MeetingTemplate[]
   loading: boolean
   error: string | null
 
@@ -28,6 +29,10 @@ interface AppState {
   fetchThisWeekTasks: () => Promise<void>
   fetchDepartments: () => Promise<void>
   updateTask: (id: number, data: UpdateTaskRequest) => Promise<Task>
+  fetchTemplates: () => Promise<void>
+  fetchTemplateDetail: (id: number) => Promise<MeetingTemplate | null>
+  createTemplate: (data: CreateTemplateRequest) => Promise<MeetingTemplate>
+  deleteTemplate: (id: number) => Promise<void>
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -39,6 +44,7 @@ export const useAppStore = create<AppState>((set) => ({
   overdueTasks: [],
   thisWeekTasks: [],
   departments: [],
+  templates: [],
   loading: false,
   error: null,
 
@@ -142,6 +148,51 @@ export const useAppStore = create<AppState>((set) => ({
       const task = await api.patch<Task>(`/tasks/${id}`, data)
       set({ loading: false })
       return task
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  fetchTemplates: async () => {
+    set({ loading: true, error: null })
+    try {
+      const templates = await api.get<MeetingTemplate[]>('/templates')
+      set({ templates, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+    }
+  },
+
+  fetchTemplateDetail: async (id: number) => {
+    set({ loading: true, error: null })
+    try {
+      const template = await api.get<MeetingTemplate>(`/templates/${id}`)
+      set({ loading: false })
+      return template
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      return null
+    }
+  },
+
+  createTemplate: async (data: CreateTemplateRequest) => {
+    set({ loading: true, error: null })
+    try {
+      const template = await api.post<MeetingTemplate>('/templates', data)
+      set({ loading: false })
+      return template
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  deleteTemplate: async (id: number) => {
+    set({ loading: true, error: null })
+    try {
+      await api.delete(`/templates/${id}`)
+      set({ loading: false })
     } catch (error) {
       set({ error: getErrorMessage(error), loading: false })
       throw error

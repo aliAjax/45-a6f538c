@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import {
   ArrowLeft,
   Plus,
@@ -8,8 +8,12 @@ import {
   Building2,
   FileText,
   Save,
+  LayoutTemplate,
+  X,
+  Check,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
+import type { MeetingTemplate } from '../../shared/types'
 
 interface TaskFormData {
   content: string
@@ -19,7 +23,8 @@ interface TaskFormData {
 
 export default function MeetingNew() {
   const navigate = useNavigate()
-  const { createMeeting, departments, fetchDepartments, loading } = useAppStore()
+  const location = useLocation()
+  const { createMeeting, departments, fetchDepartments, templates, fetchTemplates, fetchTemplateDetail, loading } = useAppStore()
 
   const [title, setTitle] = useState('')
   const [meetingDepartments, setMeetingDepartments] = useState('')
@@ -29,10 +34,49 @@ export default function MeetingNew() {
   ])
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [showTemplateModal, setShowTemplateModal] = useState(false)
+  const [selectedTemplate, setSelectedTemplate] = useState<MeetingTemplate | null>(null)
 
   useEffect(() => {
     fetchDepartments()
-  }, [fetchDepartments])
+    fetchTemplates()
+  }, [fetchDepartments, fetchTemplates])
+
+  useEffect(() => {
+    const state = location.state as { templateId?: number } | null
+    if (state?.templateId) {
+      loadTemplate(state.templateId)
+    }
+  }, [location.state])
+
+  const loadTemplate = async (templateId: number) => {
+    const template = await fetchTemplateDetail(templateId)
+    if (template && template.tasks) {
+      setTitle(template.title)
+      setMeetingDepartments(template.departments)
+      setSelectedTemplate(template)
+      const newTasks = template.tasks.map((t) => ({
+        content: t.content,
+        department: t.department,
+        deadline: '',
+      }))
+      if (newTasks.length > 0) {
+        setTasks(newTasks)
+      }
+    }
+  }
+
+  const handleSelectTemplate = (template: MeetingTemplate) => {
+    loadTemplate(template.id)
+    setShowTemplateModal(false)
+  }
+
+  const clearTemplate = () => {
+    setSelectedTemplate(null)
+    setTitle('')
+    setMeetingDepartments('')
+    setTasks([{ content: '', department: '', deadline: '' }])
+  }
 
   const addTask = () => {
     setTasks([...tasks, { content: '', department: '', deadline: '' }])
@@ -101,28 +145,55 @@ export default function MeetingNew() {
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
-      <div className="flex items-center gap-4">
-        <button
-          onClick={() => navigate('/meetings')}
-          className="p-2.5 rounded-xl hover:bg-slate-100 transition-colors text-slate-600"
-        >
-          <ArrowLeft className="w-5 h-5" />
-        </button>
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800">新建会议纪要</h1>
-          <p className="text-slate-500 text-sm">
-            填写会议信息和议定事项
-          </p>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => navigate('/meetings')}
+            className="p-2.5 rounded-xl hover:bg-slate-100 transition-colors text-slate-600"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold text-slate-800">新建会议纪要</h1>
+            <p className="text-slate-500 text-sm">
+              填写会议信息和议定事项
+            </p>
+          </div>
         </div>
+        <button
+          onClick={() => setShowTemplateModal(true)}
+          className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-xl hover:bg-indigo-100 transition-colors"
+        >
+          <LayoutTemplate className="w-4 h-4" />
+          选择模板
+        </button>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-5">
-          <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
-            <div className="w-10 h-10 rounded-xl bg-primary-50 flex items-center justify-center">
-              <FileText className="w-5 h-5 text-primary-600" />
+          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-primary-50 flex items-center justify-center">
+                <FileText className="w-5 h-5 text-primary-600" />
+              </div>
+              <div>
+                <h2 className="font-semibold text-slate-800">会议基本信息</h2>
+                {selectedTemplate && (
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
+                      模板：{selectedTemplate.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={clearTemplate}
+                      className="text-xs text-slate-400 hover:text-red-500 transition-colors"
+                    >
+                      清除
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
-            <h2 className="font-semibold text-slate-800">会议基本信息</h2>
           </div>
 
           <div>
@@ -295,6 +366,96 @@ export default function MeetingNew() {
           </button>
         </div>
       </form>
+
+      {showTemplateModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+              <h2 className="text-lg font-semibold text-slate-800">选择会议模板</h2>
+              <button
+                onClick={() => setShowTemplateModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4">
+              {loading ? (
+                <div className="py-12 text-center text-slate-500">
+                  加载中...
+                </div>
+              ) : templates.length === 0 ? (
+                <div className="py-12 text-center">
+                  <div className="w-14 h-14 rounded-full bg-slate-50 flex items-center justify-center mx-auto mb-3">
+                    <LayoutTemplate className="w-7 h-7 text-slate-400" />
+                  </div>
+                  <p className="text-slate-500 text-sm">暂无模板</p>
+                  <p className="text-slate-400 text-xs mt-1">
+                    请先在模板库中创建会议模板
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {templates.map((template) => {
+                    const isSelected = selectedTemplate?.id === template.id
+                    return (
+                      <div
+                        key={template.id}
+                        onClick={() => handleSelectTemplate(template)}
+                        className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                          isSelected
+                            ? 'border-primary-500 bg-primary-50'
+                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
+                              isSelected ? 'bg-primary-100' : 'bg-indigo-50'
+                            }`}>
+                              <LayoutTemplate className={`w-4.5 h-4.5 ${
+                                isSelected ? 'text-primary-600' : 'text-indigo-600'
+                              }`} />
+                            </div>
+                            <div>
+                              <h3 className={`font-medium text-sm ${
+                                isSelected ? 'text-primary-700' : 'text-slate-800'
+                              }`}>
+                                {template.name}
+                              </h3>
+                              <p className="text-xs text-slate-500 mt-0.5">
+                                {template.tasks?.length || 0} 条议定事项
+                              </p>
+                            </div>
+                          </div>
+                          {isSelected && (
+                            <div className="w-5 h-5 rounded-full bg-primary-600 flex items-center justify-center">
+                              <Check className="w-3 h-3 text-white" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 py-3 border-t border-slate-200 bg-slate-50">
+              <button
+                onClick={() => {
+                  setShowTemplateModal(false)
+                  navigate('/templates')
+                }}
+                className="w-full py-2 text-sm font-medium text-slate-600 hover:text-slate-800 transition-colors"
+              >
+                前往模板库管理模板
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

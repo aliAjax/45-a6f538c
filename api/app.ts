@@ -14,6 +14,7 @@ import meetingsRoutes from './routes/meetings.js'
 import tasksRoutes from './routes/tasks.js'
 import statsRoutes from './routes/stats.js'
 import departmentsRoutes from './routes/departments.js'
+import templatesRoutes from './routes/templates.js'
 import './db.js'
 
 dotenv.config()
@@ -32,6 +33,7 @@ app.use('/api/meetings', meetingsRoutes)
 app.use('/api/tasks', tasksRoutes)
 app.use('/api/stats', statsRoutes)
 app.use('/api/departments', departmentsRoutes)
+app.use('/api/templates', templatesRoutes)
 
 /**
  * health

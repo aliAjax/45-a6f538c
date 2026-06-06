@@ -44,3 +44,33 @@ export interface UpdateTaskRequest {
   status?: 'pending' | 'in_progress' | 'completed'
   progress?: string
 }
+
+export interface MeetingTemplate {
+  id: number
+  name: string
+  title: string
+  departments: string
+  createdAt: string
+  updatedAt: string
+  tasks?: TemplateTask[]
+}
+
+export interface TemplateTask {
+  id: number
+  templateId: number
+  content: string
+  department: string
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateTemplateRequest {
+  name: string
+  title: string
+  departments: string
+  tasks: Array<{
+    content: string
+    department: string
+  }>
+}
