@@ -1,6 +1,11 @@
 import { create } from 'zustand'
-import type { Meeting, Task, Stats } from '../../shared/types'
+import type { Meeting, Task, Stats, CreateMeetingRequest, UpdateTaskRequest } from '../../shared/types'
 import api from '../utils/api'
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return '操作失败'
+}
 
 interface AppState {
   stats: Stats | null
@@ -17,15 +22,15 @@ interface AppState {
   fetchStats: () => Promise<void>
   fetchMeetings: (page?: number, pageSize?: number, search?: string) => Promise<void>
   fetchMeetingDetail: (id: number) => Promise<Meeting | null>
-  createMeeting: (data: any) => Promise<Meeting>
+  createMeeting: (data: CreateMeetingRequest) => Promise<Meeting>
   fetchTasks: (department?: string, status?: string, page?: number, pageSize?: number) => Promise<void>
   fetchOverdueTasks: () => Promise<void>
   fetchThisWeekTasks: () => Promise<void>
   fetchDepartments: () => Promise<void>
-  updateTask: (id: number, data: any) => Promise<Task>
+  updateTask: (id: number, data: UpdateTaskRequest) => Promise<Task>
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
+export const useAppStore = create<AppState>((set) => ({
   stats: null,
   meetings: [],
   meetingsTotal: 0,
@@ -42,8 +47,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const stats = await api.get<Stats>('/stats')
       set({ stats, loading: false })
-    } catch (error: any) {
-      set({ error: error.message, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
     }
   },
 
@@ -57,8 +62,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (search) params.append('search', search)
       const result = await api.get<{ list: Meeting[]; total: number }>(`/meetings?${params}`)
       set({ meetings: result.list, meetingsTotal: result.total, loading: false })
-    } catch (error: any) {
-      set({ error: error.message, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
     }
   },
 
@@ -68,20 +73,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       const meeting = await api.get<Meeting>(`/meetings/${id}`)
       set({ loading: false })
       return meeting
-    } catch (error: any) {
-      set({ error: error.message, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
       return null
     }
   },
 
-  createMeeting: async (data: any) => {
+  createMeeting: async (data: CreateMeetingRequest) => {
     set({ loading: true, error: null })
     try {
       const meeting = await api.post<Meeting>('/meetings', data)
       set({ loading: false })
       return meeting
-    } catch (error: any) {
-      set({ error: error.message, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
       throw error
     }
   },
@@ -97,8 +102,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
       const result = await api.get<{ list: Task[]; total: number }>(`/tasks?${params}`)
       set({ tasks: result.list, tasksTotal: result.total, loading: false })
-    } catch (error: any) {
-      set({ error: error.message, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
     }
   },
 
@@ -107,8 +112,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const tasks = await api.get<Task[]>('/tasks/overdue')
       set({ overdueTasks: tasks, loading: false })
-    } catch (error: any) {
-      set({ error: error.message, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
     }
   },
 
@@ -117,8 +122,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const tasks = await api.get<Task[]>('/tasks/this-week')
       set({ thisWeekTasks: tasks, loading: false })
-    } catch (error: any) {
-      set({ error: error.message, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
     }
   },
 
@@ -126,19 +131,19 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const departments = await api.get<string[]>('/departments')
       set({ departments })
-    } catch (error: any) {
-      set({ error: error.message })
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
     }
   },
 
-  updateTask: async (id: number, data: any) => {
+  updateTask: async (id: number, data: UpdateTaskRequest) => {
     set({ loading: true, error: null })
     try {
       const task = await api.patch<Task>(`/tasks/${id}`, data)
       set({ loading: false })
       return task
-    } catch (error: any) {
-      set({ error: error.message, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
       throw error
     }
   },

@@ -5,12 +5,10 @@
 import express, {
   type Request,
   type Response,
-  type NextFunction,
+  type ErrorRequestHandler,
 } from 'express'
 import cors from 'cors'
-import path from 'path'
 import dotenv from 'dotenv'
-import { fileURLToPath } from 'url'
 import authRoutes from './routes/auth.js'
 import meetingsRoutes from './routes/meetings.js'
 import tasksRoutes from './routes/tasks.js'
@@ -18,11 +16,6 @@ import statsRoutes from './routes/stats.js'
 import departmentsRoutes from './routes/departments.js'
 import './db.js'
 
-// for esm mode
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
-
-// load env
 dotenv.config()
 
 const app: express.Application = express()
@@ -45,7 +38,7 @@ app.use('/api/departments', departmentsRoutes)
  */
 app.use(
   '/api/health',
-  (req: Request, res: Response, next: NextFunction): void => {
+  (_req: Request, res: Response): void => {
     res.status(200).json({
       success: true,
       message: 'ok',
@@ -56,17 +49,20 @@ app.use(
 /**
  * error handler middleware
  */
-app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
+  console.error('Server error:', error)
   res.status(500).json({
     success: false,
     error: 'Server internal error',
   })
-})
+}
+app.use(errorHandler)
 
 /**
  * 404 handler
  */
-app.use((req: Request, res: Response) => {
+app.use((_req: Request, res: Response) => {
   res.status(404).json({
     success: false,
     error: 'API not found',

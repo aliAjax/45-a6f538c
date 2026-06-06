@@ -2,9 +2,22 @@ import { Router, type Request, type Response } from 'express'
 import db from '../db.js'
 import type { Task, UpdateTaskRequest } from '../../shared/types.js'
 
+interface TaskRowWithTitle {
+  id: number
+  meeting_id: number
+  content: string
+  department: string
+  deadline: string
+  status: string
+  progress: string | null
+  created_at: string
+  updated_at: string
+  meeting_title?: string
+}
+
 const router = Router()
 
-function rowToTask(row: any): Task {
+function rowToTask(row: TaskRowWithTitle): Task {
   return {
     id: row.id,
     meetingId: row.meeting_id,
@@ -39,16 +52,16 @@ router.get('/', (req: Request, res: Response) => {
     const { department, status, page = '1', pageSize = '20' } = req.query
 
     let whereClause = 'WHERE 1=1'
-    const params: any[] = []
+    const params: (string | number)[] = []
 
     if (department && department !== 'all') {
       whereClause += ' AND t.department = ?'
-      params.push(department)
+      params.push(department as string)
     }
 
     if (status && status !== 'all') {
       whereClause += ' AND t.status = ?'
-      params.push(status)
+      params.push(status as string)
     }
 
     const countRow = db.prepare(`
@@ -73,7 +86,7 @@ router.get('/', (req: Request, res: Response) => {
         t.deadline ASC,
         t.id DESC
       LIMIT ? OFFSET ?
-    `).all(...params, Number(pageSize), offset) as any[]
+    `).all(...params, Number(pageSize), offset) as TaskRowWithTitle[]
 
     const tasks = rows.map(rowToTask)
 
@@ -92,7 +105,7 @@ router.get('/', (req: Request, res: Response) => {
   }
 })
 
-router.get('/overdue', (req: Request, res: Response) => {
+router.get('/overdue', (_req: Request, res: Response) => {
   try {
     const today = new Date().toISOString().split('T')[0]
 
@@ -102,7 +115,7 @@ router.get('/overdue', (req: Request, res: Response) => {
       LEFT JOIN meetings m ON t.meeting_id = m.id
       WHERE t.status != 'completed' AND t.deadline < ?
       ORDER BY t.deadline ASC, t.id DESC
-    `).all(today) as any[]
+    `).all(today) as TaskRowWithTitle[]
 
     const tasks = rows.map(rowToTask)
 
@@ -113,7 +126,7 @@ router.get('/overdue', (req: Request, res: Response) => {
   }
 })
 
-router.get('/this-week', (req: Request, res: Response) => {
+router.get('/this-week', (_req: Request, res: Response) => {
   try {
     const { start, end } = getThisWeekRange()
     const today = new Date().toISOString().split('T')[0]
@@ -127,7 +140,7 @@ router.get('/this-week', (req: Request, res: Response) => {
         AND t.deadline <= ?
         AND t.deadline >= ?
       ORDER BY t.deadline ASC, t.id DESC
-    `).all(start, end, today) as any[]
+    `).all(start, end, today) as TaskRowWithTitle[]
 
     const tasks = rows.map(rowToTask)
 
@@ -143,13 +156,13 @@ router.patch('/:id', (req: Request, res: Response) => {
     const { id } = req.params
     const { status, progress } = req.body as UpdateTaskRequest
 
-    const taskRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as any
+    const taskRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as TaskRowWithTitle | undefined
     if (!taskRow) {
       return res.status(404).json({ success: false, error: '事项不存在' })
     }
 
     const fields: string[] = []
-    const values: any[] = []
+    const values: (string | number)[] = []
 
     if (status !== undefined) {
       fields.push('status = ?')
@@ -166,7 +179,7 @@ router.patch('/:id', (req: Request, res: Response) => {
     }
 
     fields.push("updated_at = datetime('now', 'localtime')")
-    values.push(id)
+    values.push(Number(id))
 
     const stmt = db.prepare(`
       UPDATE tasks 
@@ -181,7 +194,7 @@ router.patch('/:id', (req: Request, res: Response) => {
       FROM tasks t
       LEFT JOIN meetings m ON t.meeting_id = m.id
       WHERE t.id = ?
-    `).get(id) as any
+    `).get(id) as TaskRowWithTitle
 
     const task = rowToTask(updatedRow)
 

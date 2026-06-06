@@ -1,13 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
   Calendar,
   Building2,
   FileText,
-  Clock,
   CheckCircle,
-  AlertCircle,
   Edit3,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
@@ -25,18 +23,17 @@ export default function MeetingDetail() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
 
-  useEffect(() => {
-    if (id) {
-      loadMeeting()
-    }
-  }, [id])
-
-  const loadMeeting = async () => {
+  const loadMeeting = useCallback(async () => {
+    if (!id) return
     setLoading(true)
     const data = await fetchMeetingDetail(Number(id))
     setMeeting(data)
     setLoading(false)
-  }
+  }, [id, fetchMeetingDetail])
+
+  useEffect(() => {
+    loadMeeting()
+  }, [loadMeeting])
 
   const handleTaskClick = (task: Task) => {
     setSelectedTask(task)
@@ -220,14 +217,6 @@ function TaskItem({
     const diff = deadlineDate.getTime() - today.getTime()
     return Math.ceil(diff / (1000 * 60 * 60 * 24))
   }
-
-  const statusIcons = {
-    pending: AlertCircle,
-    in_progress: Clock,
-    completed: CheckCircle,
-  }
-
-  const StatusIcon = statusIcons[task.status]
 
   return (
     <div

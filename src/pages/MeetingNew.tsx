@@ -91,8 +91,9 @@ export default function MeetingNew() {
         tasks: validTasks,
       })
       navigate(`/meetings/${meeting.id}`)
-    } catch (err: any) {
-      setError(err.message || '创建失败')
+    } catch (err) {
+      const error = err as Error
+      setError(error.message || '创建失败')
     } finally {
       setSubmitting(false)
     }

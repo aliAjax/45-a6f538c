@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { X, CheckCircle, Clock, AlertCircle } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
-import StatusBadge from './StatusBadge'
 import type { Task } from '../../shared/types'
 import { cn } from '../lib/utils'
 
@@ -38,8 +37,9 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
       await updateTask(task.id, { status, progress })
       onClose()
       onUpdated?.()
-    } catch (err: any) {
-      setError(err.message || '更新失败')
+    } catch (err) {
+      const error = err as Error
+      setError(error.message || '更新失败')
     } finally {
       setLoading(false)
     }

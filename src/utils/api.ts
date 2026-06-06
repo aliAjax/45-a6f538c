@@ -1,5 +1,11 @@
 const API_BASE = '/api'
 
+interface ApiResponse<T> {
+  success: boolean
+  data: T
+  error?: string
+}
+
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE}${url}`, {
     ...options,
@@ -9,7 +15,7 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
     },
   })
 
-  const data = await response.json()
+  const data = (await response.json()) as ApiResponse<T>
 
   if (!response.ok || !data.success) {
     throw new Error(data.error || '请求失败')
@@ -20,11 +26,11 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 
 export const api = {
   get: <T>(url: string) => request<T>(url, { method: 'GET' }),
-  post: <T>(url: string, body: any) =>
+  post: <T>(url: string, body: unknown) =>
     request<T>(url, { method: 'POST', body: JSON.stringify(body) }),
-  patch: <T>(url: string, body: any) =>
+  patch: <T>(url: string, body: unknown) =>
     request<T>(url, { method: 'PATCH', body: JSON.stringify(body) }),
-  put: <T>(url: string, body: any) =>
+  put: <T>(url: string, body: unknown) =>
     request<T>(url, { method: 'PUT', body: JSON.stringify(body) }),
   delete: <T>(url: string) => request<T>(url, { method: 'DELETE' }),
 }
