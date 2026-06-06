@@ -53,6 +53,7 @@ export interface MeetingTemplate {
   createdAt: string
   updatedAt: string
   tasks?: TemplateTask[]
+  taskCount?: number
 }
 
 export interface TemplateTask {

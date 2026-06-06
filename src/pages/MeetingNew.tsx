@@ -425,7 +425,7 @@ export default function MeetingNew() {
                                 {template.name}
                               </h3>
                               <p className="text-xs text-slate-500 mt-0.5">
-                                {template.tasks?.length || 0} 条议定事项
+                                {template.taskCount ?? template.tasks?.length ?? 0} 条议定事项
                               </p>
                             </div>
                           </div>

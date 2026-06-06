@@ -9,6 +9,7 @@ interface TemplateRow {
   departments: string
   created_at: string
   updated_at: string
+  task_count?: number
 }
 
 interface TemplateTaskRow {
@@ -31,6 +32,7 @@ function rowToTemplate(row: TemplateRow): MeetingTemplate {
     departments: row.departments,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    taskCount: row.task_count,
   }
 }
 
@@ -48,9 +50,13 @@ function rowToTemplateTask(row: TemplateTaskRow): TemplateTask {
 
 router.get('/', (req: Request, res: Response) => {
   try {
-    const rows = db.prepare(
-      'SELECT * FROM meeting_templates ORDER BY created_at DESC, id DESC'
-    ).all() as TemplateRow[]
+    const rows = db.prepare(`
+      SELECT mt.*, COUNT(tt.id) as task_count
+      FROM meeting_templates mt
+      LEFT JOIN template_tasks tt ON mt.id = tt.template_id
+      GROUP BY mt.id
+      ORDER BY mt.created_at DESC, mt.id DESC
+    `).all() as TemplateRow[]
 
     const templates = rows.map(rowToTemplate)
 

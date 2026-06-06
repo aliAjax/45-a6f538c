@@ -205,7 +205,7 @@ export default function TemplateList() {
                 <div className="flex items-center gap-2">
                   <ListTodo className="w-4 h-4 text-slate-400 flex-shrink-0" />
                   <p className="text-sm text-slate-600">
-                    {template.tasks?.length || 0} 条议定事项
+                    {template.taskCount ?? template.tasks?.length ?? 0} 条议定事项
                   </p>
                 </div>
               </div>
