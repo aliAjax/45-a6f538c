@@ -6,6 +6,8 @@ import {
   Users,
   Bell,
   LayoutTemplate,
+  Building2,
+  Settings,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 
@@ -14,6 +16,7 @@ const navItems = [
   { path: '/meetings', label: '会议纪要', icon: FileText },
   { path: '/tasks', label: '待办事项', icon: CheckSquare },
   { path: '/templates', label: '模板库', icon: LayoutTemplate },
+  { path: '/departments', label: '科室管理', icon: Building2 },
 ]
 
 interface LayoutProps {

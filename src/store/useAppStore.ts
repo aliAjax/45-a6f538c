@@ -1,5 +1,16 @@
 import { create } from 'zustand'
-import type { Meeting, Task, Stats, CreateMeetingRequest, UpdateTaskRequest, MeetingTemplate, CreateTemplateRequest } from '../../shared/types'
+import type {
+  Meeting,
+  Task,
+  Stats,
+  CreateMeetingRequest,
+  UpdateTaskRequest,
+  MeetingTemplate,
+  CreateTemplateRequest,
+  Department,
+  CreateDepartmentRequest,
+  UpdateDepartmentRequest,
+} from '../../shared/types'
 import api from '../utils/api'
 
 function getErrorMessage(error: unknown): string {
@@ -16,6 +27,7 @@ interface AppState {
   overdueTasks: Task[]
   thisWeekTasks: Task[]
   departments: string[]
+  departmentList: Department[]
   templates: MeetingTemplate[]
   loading: boolean
   error: string | null
@@ -28,6 +40,11 @@ interface AppState {
   fetchOverdueTasks: () => Promise<void>
   fetchThisWeekTasks: () => Promise<void>
   fetchDepartments: () => Promise<void>
+  fetchAllDepartments: () => Promise<void>
+  createDepartment: (data: CreateDepartmentRequest) => Promise<Department>
+  updateDepartment: (id: number, data: UpdateDepartmentRequest) => Promise<Department>
+  toggleDepartmentStatus: (id: number) => Promise<Department>
+  deleteDepartment: (id: number) => Promise<void>
   updateTask: (id: number, data: UpdateTaskRequest) => Promise<Task>
   fetchTemplates: () => Promise<void>
   fetchTemplateDetail: (id: number) => Promise<MeetingTemplate | null>
@@ -44,6 +61,7 @@ export const useAppStore = create<AppState>((set) => ({
   overdueTasks: [],
   thisWeekTasks: [],
   departments: [],
+  departmentList: [],
   templates: [],
   loading: false,
   error: null,
@@ -135,10 +153,90 @@ export const useAppStore = create<AppState>((set) => ({
 
   fetchDepartments: async () => {
     try {
-      const departments = await api.get<string[]>('/departments')
+      const deptList = await api.get<Department[]>('/departments/active')
+      const departments = deptList.map((d) => d.name)
       set({ departments })
     } catch (error) {
       set({ error: getErrorMessage(error) })
+    }
+  },
+
+  fetchAllDepartments: async () => {
+    set({ loading: true, error: null })
+    try {
+      const deptList = await api.get<Department[]>('/departments')
+      const departments = deptList.filter((d) => d.isActive).map((d) => d.name)
+      set({ departmentList: deptList, departments, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+    }
+  },
+
+  createDepartment: async (data: CreateDepartmentRequest) => {
+    set({ loading: true, error: null })
+    try {
+      const dept = await api.post<Department>('/departments', data)
+      set((state) => {
+        const newList = [...state.departmentList, dept].sort(
+          (a, b) => a.sortOrder - b.sortOrder || a.id - b.id
+        )
+        const newDeptNames = newList.filter((d) => d.isActive).map((d) => d.name)
+        return { departmentList: newList, departments: newDeptNames, loading: false }
+      })
+      return dept
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  updateDepartment: async (id: number, data: UpdateDepartmentRequest) => {
+    set({ loading: true, error: null })
+    try {
+      const dept = await api.put<Department>(`/departments/${id}`, data)
+      set((state) => {
+        const newList = state.departmentList
+          .map((d) => (d.id === id ? dept : d))
+          .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
+        const newDeptNames = newList.filter((d) => d.isActive).map((d) => d.name)
+        return { departmentList: newList, departments: newDeptNames, loading: false }
+      })
+      return dept
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  toggleDepartmentStatus: async (id: number) => {
+    try {
+      const dept = await api.patch<Department>(`/departments/${id}/toggle`)
+      set((state) => {
+        const newList = state.departmentList
+          .map((d) => (d.id === id ? dept : d))
+          .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
+        const newDeptNames = newList.filter((d) => d.isActive).map((d) => d.name)
+        return { departmentList: newList, departments: newDeptNames }
+      })
+      return dept
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+  },
+
+  deleteDepartment: async (id: number) => {
+    set({ loading: true, error: null })
+    try {
+      await api.delete(`/departments/${id}`)
+      set((state) => {
+        const newList = state.departmentList.filter((d) => d.id !== id)
+        const newDeptNames = newList.filter((d) => d.isActive).map((d) => d.name)
+        return { departmentList: newList, departments: newDeptNames, loading: false }
+      })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
     }
   },
 

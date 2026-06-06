@@ -75,3 +75,23 @@ export interface CreateTemplateRequest {
     department: string
   }>
 }
+
+export interface Department {
+  id: number
+  name: string
+  sortOrder: number
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateDepartmentRequest {
+  name: string
+  sortOrder?: number
+}
+
+export interface UpdateDepartmentRequest {
+  name?: string
+  sortOrder?: number
+  isActive?: boolean
+}

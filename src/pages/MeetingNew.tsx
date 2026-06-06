@@ -315,12 +315,6 @@ export default function MeetingNew() {
                             {dept}
                           </option>
                         ))}
-                        <option value="办公室">办公室</option>
-                        <option value="人事科">人事科</option>
-                        <option value="财务科">财务科</option>
-                        <option value="业务一科">业务一科</option>
-                        <option value="业务二科">业务二科</option>
-                        <option value="安全科">安全科</option>
                       </select>
                     </div>
 

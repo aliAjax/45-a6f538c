@@ -69,6 +69,19 @@ function initDatabase() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_template_tasks_template_id ON template_tasks(template_id);
+
+    CREATE TABLE IF NOT EXISTS departments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now', 'localtime')),
+      updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_departments_name ON departments(name);
+    CREATE INDEX IF NOT EXISTS idx_departments_is_active ON departments(is_active);
+    CREATE INDEX IF NOT EXISTS idx_departments_sort_order ON departments(sort_order);
   `)
 
   const meetingCount = db.prepare('SELECT COUNT(*) as count FROM meetings').get() as { count: number }
@@ -164,6 +177,56 @@ function initDatabase() {
 
     tasks2.forEach((task, index) => {
       insertTemplateTask.run(template2.lastInsertRowid, task.content, task.department, index)
+    })
+  }
+
+  const deptCount = db.prepare('SELECT COUNT(*) as count FROM departments').get() as { count: number }
+  if (deptCount.count === 0) {
+    const insertDept = db.prepare(`
+      INSERT INTO departments (name, sort_order, is_active)
+      VALUES (?, ?, 1)
+    `)
+
+    const defaultDepartments = [
+      { name: '办公室', sortOrder: 1 },
+      { name: '人事科', sortOrder: 2 },
+      { name: '财务科', sortOrder: 3 },
+      { name: '业务一科', sortOrder: 4 },
+      { name: '业务二科', sortOrder: 5 },
+      { name: '安全科', sortOrder: 6 },
+    ]
+
+    defaultDepartments.forEach((dept) => {
+      insertDept.run(dept.name, dept.sortOrder)
+    })
+
+    const taskDepts = db.prepare(`
+      SELECT DISTINCT department 
+      FROM tasks 
+      WHERE department NOT IN (SELECT name FROM departments)
+      ORDER BY department ASC
+    `).all() as { department: string }[]
+
+    let nextSortOrder = defaultDepartments.length + 1
+    taskDepts.forEach((row) => {
+      if (row.department && row.department.trim()) {
+        insertDept.run(row.department.trim(), nextSortOrder)
+        nextSortOrder++
+      }
+    })
+
+    const templateDepts = db.prepare(`
+      SELECT DISTINCT department 
+      FROM template_tasks 
+      WHERE department NOT IN (SELECT name FROM departments)
+      ORDER BY department ASC
+    `).all() as { department: string }[]
+
+    templateDepts.forEach((row) => {
+      if (row.department && row.department.trim()) {
+        insertDept.run(row.department.trim(), nextSortOrder)
+        nextSortOrder++
+      }
     })
   }
 }
