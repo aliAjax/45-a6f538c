@@ -19,6 +19,7 @@ import {
   Eye,
   MessageSquare,
   Megaphone,
+  ExternalLink,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { cn } from '../lib/utils'
@@ -396,6 +397,11 @@ function MeetingReviewCard({
     onToggleExpand()
   }
 
+  const handleViewDetail = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    onClick()
+  }
+
   return (
     <div
       className={cn(
@@ -406,10 +412,9 @@ function MeetingReviewCard({
       )}
     >
       <div
-        onClick={onClick}
+        onClick={onToggleExpand}
         className={cn(
           'p-5 cursor-pointer hover:shadow-md group transition-all',
-          isExpanded ? '' : ''
         )}
       >
         <div className="flex items-start justify-between mb-4">
@@ -531,6 +536,19 @@ function MeetingReviewCard({
           <span className="text-xs text-slate-500 whitespace-nowrap">
             {meeting.completedTasks}/{meeting.totalTasks} 项
           </span>
+        </div>
+
+        <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+          <span className="text-xs text-slate-400">
+            点击卡片展开查看详情
+          </span>
+          <button
+            onClick={handleViewDetail}
+            className="inline-flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 font-medium transition-colors"
+          >
+            查看会议详情
+            <ExternalLink className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
 
