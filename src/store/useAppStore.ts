@@ -15,6 +15,7 @@ import type {
   CalendarMonthData,
   ReminderGroups,
   MeetingReviewStats,
+  ParseMeetingResponse,
 } from '../../shared/types'
 import api from '../utils/api'
 
@@ -66,6 +67,7 @@ interface AppState {
   deleteTemplate: (id: number) => Promise<void>
   fetchReminders: () => Promise<void>
   fetchMeetingReviewStats: (page?: number, pageSize?: number, startDate?: string, endDate?: string, search?: string) => Promise<void>
+  parseMeetingText: (text: string) => Promise<ParseMeetingResponse>
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -380,6 +382,18 @@ export const useAppStore = create<AppState>((set) => ({
       set({ meetingReviewList: result.list, meetingReviewTotal: result.total, loading: false })
     } catch (error) {
       set({ error: getErrorMessage(error), loading: false })
+    }
+  },
+
+  parseMeetingText: async (text: string) => {
+    set({ loading: true, error: null })
+    try {
+      const result = await api.post<ParseMeetingResponse>('/meetings/parse', { text })
+      set({ loading: false })
+      return result
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
     }
   },
 }))

@@ -142,3 +142,26 @@ export interface MeetingReviewStats {
   overdueTasks: number
   completionRate: number
 }
+
+export interface ParsedTask {
+  content: string
+  department: string
+  deadline: string
+}
+
+export interface ParsedMeeting {
+  title: string
+  departments: string
+  meetingDate: string
+  tasks: ParsedTask[]
+  warnings: string[]
+}
+
+export interface ParseMeetingRequest {
+  text: string
+}
+
+export interface ParseMeetingResponse {
+  meetings: ParsedMeeting[]
+  warnings: string[]
+}

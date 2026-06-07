@@ -8,6 +8,7 @@ import {
   FileText,
   ChevronLeft,
   ChevronRight,
+  Upload,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import StatusBadge from '../components/StatusBadge'
@@ -38,13 +39,22 @@ export default function MeetingList() {
           <h1 className="text-2xl font-bold text-slate-800 mb-1">会议纪要</h1>
           <p className="text-slate-500 text-sm">管理和查看所有会议纪要</p>
         </div>
-        <button
-          onClick={() => navigate('/meetings/new')}
-          className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white text-sm font-medium rounded-xl hover:bg-primary-700 transition-colors shadow-sm shadow-primary-200"
-        >
-          <Plus className="w-4.5 h-4.5" />
-          新建纪要
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/meetings/import')}
+            className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-100 text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-200 transition-colors"
+          >
+            <Upload className="w-4.5 h-4.5" />
+            批量导入
+          </button>
+          <button
+            onClick={() => navigate('/meetings/new')}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-primary-600 text-white text-sm font-medium rounded-xl hover:bg-primary-700 transition-colors shadow-sm shadow-primary-200"
+          >
+            <Plus className="w-4.5 h-4.5" />
+            新建纪要
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">

@@ -6,6 +6,8 @@ import MeetingNew from './pages/MeetingNew'
 import MeetingDetail from './pages/MeetingDetail'
 import MeetingPrint from './pages/MeetingPrint'
 import MeetingReview from './pages/MeetingReview'
+import MeetingImport from './pages/MeetingImport'
+import MeetingImportPreview from './pages/MeetingImportPreview'
 import TaskList from './pages/TaskList'
 import TaskCalendar from './pages/TaskCalendar'
 import TemplateList from './pages/TemplateList'
@@ -24,6 +26,8 @@ export default function App() {
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/meetings" element={<MeetingList />} />
                 <Route path="/meetings/new" element={<MeetingNew />} />
+                <Route path="/meetings/import" element={<MeetingImport />} />
+                <Route path="/meetings/import/preview" element={<MeetingImportPreview />} />
                 <Route path="/meetings/:id" element={<MeetingDetail />} />
                 <Route path="/review" element={<MeetingReview />} />
                 <Route path="/tasks" element={<TaskList />} />

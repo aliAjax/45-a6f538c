@@ -1,6 +1,15 @@
 import { Router, type Request, type Response } from 'express'
 import db from '../db.js'
-import type { Meeting, Task, CreateMeetingRequest, MeetingReviewStats } from '../../shared/types.js'
+import type {
+  Meeting,
+  Task,
+  CreateMeetingRequest,
+  MeetingReviewStats,
+  ParsedMeeting,
+  ParsedTask,
+  ParseMeetingRequest,
+  ParseMeetingResponse,
+} from '../../shared/types.js'
 
 interface MeetingRow {
   id: number
@@ -162,6 +171,316 @@ function addDays(dateStr: string, days: number): string {
   date.setDate(date.getDate() + days)
   return date.toISOString().split('T')[0]
 }
+
+function normalizeDate(dateStr: string): string {
+  const cleaned = dateStr.trim().replace(/年|月/g, '-').replace(/日/g, '')
+  const date = new Date(cleaned)
+  if (isNaN(date.getTime())) {
+    return ''
+  }
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function isValidDate(dateStr: string): boolean {
+  if (!dateStr) return false
+  const date = new Date(dateStr)
+  return !isNaN(date.getTime())
+}
+
+function deduplicateDepartments(departments: string): string {
+  const parts = departments
+    .split(/[、,，;；\s]+/)
+    .map((d) => d.trim())
+    .filter((d) => d.length > 0)
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const dept of parts) {
+    if (!seen.has(dept)) {
+      seen.add(dept)
+      result.push(dept)
+    }
+  }
+  return result.join('、')
+}
+
+function parseSingleMeeting(text: string): ParsedMeeting {
+  const lines = text.split('\n').map((l) => l.trim())
+  const warnings: string[] = []
+  let title = ''
+  let departments = ''
+  let meetingDate = ''
+  const tasks: ParsedTask[] = []
+
+  const titlePatterns = [
+    /^会议主题[:：]\s*(.+)/i,
+    /^主题[:：]\s*(.+)/i,
+    /^会议名称[:：]\s*(.+)/i,
+    /^会议议题[:：]\s*(.+)/i,
+  ]
+
+  const deptPatterns = [
+    /^参会部门[:：]\s*(.+)/i,
+    /^部门[:：]\s*(.+)/i,
+    /^参会人员[:：]\s*(.+)/i,
+    /^参加部门[:：]\s*(.+)/i,
+    /^与会部门[:：]\s*(.+)/i,
+  ]
+
+  const datePatterns = [
+    /^会议时间[:：]\s*(.+)/i,
+    /^时间[:：]\s*(.+)/i,
+    /^日期[:：]\s*(.+)/i,
+    /^会议日期[:：]\s*(.+)/i,
+    /^召开时间[:：]\s*(.+)/i,
+  ]
+
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    if (!line) {
+      i++
+      continue
+    }
+
+    let matched = false
+
+    for (const pattern of titlePatterns) {
+      const match = line.match(pattern)
+      if (match) {
+        title = match[1].trim()
+        matched = true
+        break
+      }
+    }
+    if (matched) {
+      i++
+      continue
+    }
+
+    for (const pattern of deptPatterns) {
+      const match = line.match(pattern)
+      if (match) {
+        departments = match[1].trim()
+        matched = true
+        break
+      }
+    }
+    if (matched) {
+      i++
+      continue
+    }
+
+    for (const pattern of datePatterns) {
+      const match = line.match(pattern)
+      if (match) {
+        meetingDate = match[1].trim()
+        matched = true
+        break
+      }
+    }
+    if (matched) {
+      i++
+      continue
+    }
+
+    const taskMatch = line.match(/^(\d+)[.、．]\s*(.+)/)
+    const bulletMatch = line.match(/^[•\-●○■▪▫–—]\s*(.+)/)
+
+    if (taskMatch || bulletMatch) {
+      const taskContent = taskMatch ? taskMatch[2] : bulletMatch![1]
+      let content = taskContent.trim()
+      let taskDepartment = ''
+      let taskDeadline = ''
+
+      const deptInContentMatch = content.match(/^(.+?)[（(]([^)）]+)[）)]\s*[:：]?\s*(.*)$/)
+      if (deptInContentMatch) {
+        taskDepartment = deptInContentMatch[2].trim()
+        content = (deptInContentMatch[1] + (deptInContentMatch[3] ? '：' + deptInContentMatch[3] : '')).trim()
+      }
+
+      const deadlinePatterns = [
+        /[于在]\s*(\d{4}[年\-]\d{1,2}[月\-]\d{1,2}日?)\s*(?:前|之前|完成|提交|截止)?/,
+        /(?:截止|期限|完成期限)[:：]?\s*(\d{4}[年\-]\d{1,2}[月\-]\d{1,2}日?)\s*(?:前|之前|完成)?/,
+        /(\d{4}[年\-]\d{1,2}[月\-]\d{1,2}日?)\s*(?:前|之前|完成|截止)/,
+      ]
+
+      for (const pattern of deadlinePatterns) {
+        const dlMatch = content.match(pattern)
+        if (dlMatch) {
+          const dateStr = dlMatch[1].trim()
+          const normalized = normalizeDate(dateStr)
+          if (normalized) {
+            taskDeadline = normalized
+            let cleaned = content.replace(dlMatch[0], '')
+            cleaned = cleaned.replace(/[，,。.：:；;、\s]+$/, '')
+            cleaned = cleaned.replace(/^[，,。.：:；;、\s]+/, '')
+            cleaned = cleaned.replace(/\s{2,}/g, ' ')
+            content = cleaned.trim()
+          }
+          break
+        }
+      }
+
+      if (!taskDepartment) {
+        const deptColonMatch = content.match(/^(.+?)[:：]\s*(.+)$/)
+        if (deptColonMatch) {
+          const potentialDept = deptColonMatch[1].trim()
+          if (potentialDept.length <= 10 && !potentialDept.includes(' ')) {
+            taskDepartment = potentialDept
+            content = deptColonMatch[2].trim()
+          }
+        }
+      }
+
+      i++
+      while (i < lines.length) {
+        const nextLine = lines[i]
+        if (!nextLine) {
+          i++
+          break
+        }
+        const isNextTask =
+          /^(\d+)[.、．]/.test(nextLine) ||
+          /^[•\-●○■▪▫–—]/.test(nextLine) ||
+          titlePatterns.some((p) => p.test(nextLine)) ||
+          deptPatterns.some((p) => p.test(nextLine)) ||
+          datePatterns.some((p) => p.test(nextLine))
+        if (isNextTask) {
+          break
+        }
+        content += ' ' + nextLine.trim()
+        i++
+      }
+
+      tasks.push({
+        content: content.trim(),
+        department: taskDepartment,
+        deadline: taskDeadline,
+      })
+      continue
+    }
+
+    if (!title && line.length > 0 && line.length < 50 && i < 3) {
+      title = line
+    }
+
+    i++
+  }
+
+  if (departments) {
+    const originalDepts = departments
+    departments = deduplicateDepartments(departments)
+    if (originalDepts !== departments) {
+      warnings.push('参会部门已去重')
+    }
+  }
+
+  if (meetingDate) {
+    const normalized = normalizeDate(meetingDate)
+    if (normalized) {
+      meetingDate = normalized
+    } else {
+      warnings.push('会议时间格式无法识别，请手动填写')
+      meetingDate = ''
+    }
+  }
+
+  if (!title) {
+    warnings.push('未识别到会议主题，请手动填写')
+  }
+  if (!departments) {
+    warnings.push('未识别到参会部门，请手动填写')
+  }
+  if (!meetingDate) {
+    warnings.push('未识别到会议时间，请手动填写')
+  }
+  if (tasks.length === 0) {
+    warnings.push('未识别到议定事项，请手动添加')
+  }
+
+  tasks.forEach((task, idx) => {
+    if (!task.content.trim()) {
+      warnings.push(`第 ${idx + 1} 条事项内容为空`)
+    }
+    if (!task.department) {
+      warnings.push(`第 ${idx + 1} 条事项未识别到责任科室`)
+    }
+    if (!task.deadline) {
+      warnings.push(`第 ${idx + 1} 条事项未识别到完成期限`)
+    } else if (!isValidDate(task.deadline)) {
+      warnings.push(`第 ${idx + 1} 条事项完成期限无效`)
+    }
+  })
+
+  return {
+    title,
+    departments,
+    meetingDate,
+    tasks,
+    warnings,
+  }
+}
+
+function splitMeetings(text: string): string[] {
+  const separators = [
+    /\n\s*-{3,}\s*\n/,
+    /\n\s*={3,}\s*\n/,
+    /\n\s*【.*?】\s*\n/,
+  ]
+
+  let parts = [text]
+
+  for (const sep of separators) {
+    const newParts: string[] = []
+    for (const part of parts) {
+      newParts.push(...part.split(sep))
+    }
+    parts = newParts
+  }
+
+  const result = parts
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0)
+
+  if (result.length === 1 && result[0].length > 0) {
+    return [result[0]]
+  }
+
+  return result
+}
+
+router.post('/parse', (req: Request, res: Response) => {
+  try {
+    const { text } = req.body as ParseMeetingRequest
+
+    if (!text || !text.trim()) {
+      return res.status(400).json({ success: false, error: '请输入要解析的文本内容' })
+    }
+
+    const meetingTexts = splitMeetings(text)
+    const meetings: ParsedMeeting[] = meetingTexts.map(parseSingleMeeting)
+
+    const allWarnings: string[] = []
+    meetings.forEach((m, idx) => {
+      if (m.warnings.length > 0) {
+        allWarnings.push(...m.warnings.map((w) => `第 ${idx + 1} 个会议：${w}`))
+      }
+    })
+
+    const response: ParseMeetingResponse = {
+      meetings,
+      warnings: allWarnings,
+    }
+
+    res.json({ success: true, data: response })
+  } catch (error) {
+    console.error('Parse meeting error:', error)
+    res.status(500).json({ success: false, error: '解析会议纪要失败' })
+  }
+})
 
 router.get('/review/stats', (req: Request, res: Response) => {
   try {
