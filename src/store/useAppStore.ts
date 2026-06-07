@@ -16,6 +16,8 @@ import type {
   CreateDepartmentRequest,
   UpdateDepartmentRequest,
   DepartmentStats,
+  DepartmentRiskStats,
+  DepartmentRiskDetail,
   CalendarMonthData,
   ReminderGroups,
   MeetingReviewStats,
@@ -54,6 +56,8 @@ interface AppState {
   meetingReviewList: MeetingReviewStats[]
   meetingReviewTotal: number
   departmentWorkbench: DepartmentWorkbenchData | null
+  departmentRiskStats: DepartmentRiskStats[]
+  departmentRiskDetail: DepartmentRiskDetail | null
   supervisingTasks: Task[]
   loading: boolean
   error: string | null
@@ -69,6 +73,8 @@ interface AppState {
   fetchDepartments: () => Promise<void>
   fetchAllDepartments: () => Promise<void>
   fetchDepartmentTaskStats: () => Promise<void>
+  fetchDepartmentRiskStats: () => Promise<void>
+  fetchDepartmentRiskDetail: (department: string) => Promise<void>
   createDepartment: (data: CreateDepartmentRequest) => Promise<Department>
   updateDepartment: (id: number, data: UpdateDepartmentRequest) => Promise<Department>
   toggleDepartmentStatus: (id: number) => Promise<Department>
@@ -113,6 +119,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   meetingReviewList: [],
   meetingReviewTotal: 0,
   departmentWorkbench: null,
+  departmentRiskStats: [],
+  departmentRiskDetail: null,
   supervisingTasks: [],
   loading: false,
   error: null,
@@ -248,6 +256,25 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  fetchDepartmentRiskStats: async () => {
+    try {
+      const stats = await api.get<DepartmentRiskStats[]>('/departments/stats/risk')
+      set({ departmentRiskStats: stats })
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+    }
+  },
+
+  fetchDepartmentRiskDetail: async (department: string) => {
+    set({ loading: true, error: null })
+    try {
+      const detail = await api.get<DepartmentRiskDetail>(`/tasks/risk/${encodeURIComponent(department)}`)
+      set({ departmentRiskDetail: detail, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+    }
+  },
+
   createDepartment: async (data: CreateDepartmentRequest) => {
     set({ loading: true, error: null })
     try {
@@ -340,9 +367,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           fetchOverdueTasks,
           fetchThisWeekTasks,
           fetchDepartmentTaskStats,
+          fetchDepartmentRiskStats,
           fetchTasks,
           fetchDepartmentWorkbench,
+          fetchDepartmentRiskDetail,
           departmentWorkbench,
+          departmentRiskDetail,
           tasks,
         } = get()
 
@@ -350,6 +380,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         fetchOverdueTasks()
         fetchThisWeekTasks()
         fetchDepartmentTaskStats()
+        fetchDepartmentRiskStats()
 
         if (tasks.length > 0) {
           fetchTasks('all', 'all', 1, 50)
@@ -357,6 +388,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
         if (departmentWorkbench) {
           fetchDepartmentWorkbench(departmentWorkbench.department)
+        }
+
+        if (departmentRiskDetail) {
+          fetchDepartmentRiskDetail(departmentRiskDetail.department)
         }
       }
 

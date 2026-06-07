@@ -11,6 +11,8 @@ import type {
   BatchUpdateTaskResponse,
   BatchUpdateTaskResult,
   DepartmentWorkbenchData,
+  DepartmentRiskDetail,
+  DepartmentRiskStats,
 } from '../../shared/types.js'
 
 interface TaskRowWithTitle {
@@ -648,6 +650,226 @@ router.get('/workbench/:department', (req: Request, res: Response) => {
   } catch (error) {
     console.error('Get department workbench error:', error)
     res.status(500).json({ success: false, error: '获取科室工作台数据失败' })
+  }
+})
+
+function getDueSoonRange(): { start: string; end: string } {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const endDate = new Date(today)
+  endDate.setDate(endDate.getDate() + 3)
+  return {
+    start: today.toISOString().split('T')[0],
+    end: endDate.toISOString().split('T')[0],
+  }
+}
+
+function getLongNoUpdateDate(): string {
+  const now = new Date()
+  const date = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  date.setDate(date.getDate() - 15)
+  return date.toISOString().split('T')[0]
+}
+
+function calculateRiskLevel(stats: {
+  overdueCount: number
+  maxOverdueDays: number
+  dueSoonCount: number
+  supervisingCount: number
+  longNoUpdateCount: number
+  completionRate: number
+  total: number
+}): { level: 'high' | 'medium' | 'low'; score: number; factors: string[] } {
+  let score = 0
+  const factors: string[] = []
+
+  if (stats.overdueCount > 0) {
+    const overdueScore = Math.min(stats.overdueCount * 10 + stats.maxOverdueDays, 40)
+    score += overdueScore
+    factors.push(`逾期 ${stats.overdueCount} 项，最长逾期 ${stats.maxOverdueDays} 天`)
+  }
+
+  if (stats.supervisingCount > 0) {
+    const superviseScore = Math.min(stats.supervisingCount * 15, 30)
+    score += superviseScore
+    factors.push(`督办中 ${stats.supervisingCount} 项`)
+  }
+
+  if (stats.longNoUpdateCount > 0) {
+    const longNoUpdateScore = Math.min(stats.longNoUpdateCount * 8, 25)
+    score += longNoUpdateScore
+    factors.push(`长期未更新 ${stats.longNoUpdateCount} 项`)
+  }
+
+  if (stats.dueSoonCount > 0) {
+    const dueSoonScore = Math.min(stats.dueSoonCount * 3, 15)
+    score += dueSoonScore
+    factors.push(`临期 ${stats.dueSoonCount} 项`)
+  }
+
+  if (stats.total > 0 && stats.completionRate < 60) {
+    score += 15
+    factors.push(`完成率仅 ${stats.completionRate.toFixed(1)}%`)
+  }
+
+  let level: 'high' | 'medium' | 'low' = 'low'
+  if (score >= 40) {
+    level = 'high'
+  } else if (score >= 15) {
+    level = 'medium'
+  }
+
+  if (factors.length === 0) {
+    factors.push('风险可控')
+  }
+
+  return { level, score, factors }
+}
+
+router.get('/risk/:department', (req: Request, res: Response) => {
+  try {
+    const { department } = req.params
+    const today = new Date().toISOString().split('T')[0]
+    const { start: dueSoonStart, end: dueSoonEnd } = getDueSoonRange()
+    const longNoUpdateDate = getLongNoUpdateDate()
+
+    const baseQuery = `
+      SELECT t.*, m.title as meeting_title,
+        EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        ) as has_active_supervision
+      FROM tasks t
+      LEFT JOIN meetings m ON t.meeting_id = m.id
+      WHERE t.department = ?
+    `
+
+    const overdueRows = db.prepare(`
+      ${baseQuery}
+        AND t.status != 'completed'
+        AND t.deadline < ?
+      ORDER BY t.deadline ASC, t.id DESC
+    `).all(department, today) as TaskRowWithTitle[]
+
+    const dueSoonRows = db.prepare(`
+      ${baseQuery}
+        AND t.status != 'completed'
+        AND t.deadline >= ?
+        AND t.deadline <= ?
+      ORDER BY t.deadline ASC, t.id DESC
+    `).all(department, dueSoonStart, dueSoonEnd) as TaskRowWithTitle[]
+
+    const supervisingRows = db.prepare(`
+      ${baseQuery}
+        AND t.status != 'completed'
+        AND EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        )
+      ORDER BY t.updated_at DESC, t.id DESC
+    `).all(department) as TaskRowWithTitle[]
+
+    const longNoUpdateRows = db.prepare(`
+      ${baseQuery}
+        AND t.status != 'completed'
+        AND t.updated_at < ?
+      ORDER BY t.updated_at ASC, t.id DESC
+    `).all(department, longNoUpdateDate) as TaskRowWithTitle[]
+
+    const overdueTasks = overdueRows.map(rowToTask)
+    const dueSoonTasks = dueSoonRows.map(rowToTask)
+    const supervisingTasks = supervisingRows.map(rowToTask)
+    const longNoUpdateTasks = longNoUpdateRows.map(rowToTask)
+
+    const riskTaskIds = new Set<number>()
+    overdueTasks.forEach((t) => riskTaskIds.add(t.id))
+    dueSoonTasks.forEach((t) => riskTaskIds.add(t.id))
+    supervisingTasks.forEach((t) => riskTaskIds.add(t.id))
+    longNoUpdateTasks.forEach((t) => riskTaskIds.add(t.id))
+
+    const allRiskMap = new Map<number, Task>()
+    ;[...overdueTasks, ...dueSoonTasks, ...supervisingTasks, ...longNoUpdateTasks].forEach((t) => {
+      if (!allRiskMap.has(t.id)) {
+        allRiskMap.set(t.id, t)
+      }
+    })
+    const riskTasks = Array.from(allRiskMap.values()).sort((a, b) => {
+      const aOverdue = overdueTasks.some((t) => t.id === a.id)
+      const bOverdue = overdueTasks.some((t) => t.id === b.id)
+      if (aOverdue && !bOverdue) return -1
+      if (!aOverdue && bOverdue) return 1
+      if (a.deadline < b.deadline) return -1
+      if (a.deadline > b.deadline) return 1
+      return b.id - a.id
+    })
+
+    const totalCountRow = db.prepare(`
+      SELECT COUNT(*) as count
+      FROM tasks
+      WHERE department = ?
+    `).get(department) as { count: number }
+
+    const completedCountRow = db.prepare(`
+      SELECT COUNT(*) as count
+      FROM tasks
+      WHERE department = ? AND status = 'completed'
+    `).get(department) as { count: number }
+
+    const maxOverdueRow = db.prepare(`
+      SELECT MAX(CAST((julianday(?) - julianday(t.deadline)) AS INTEGER)) as max_days
+      FROM tasks t
+      WHERE t.department = ?
+        AND t.status != 'completed'
+        AND t.deadline < ?
+    `).get(today, department, today) as { max_days: number | null }
+
+    const total = totalCountRow.count
+    const completed = completedCountRow.count
+    const completionRate = total > 0 ? Math.round((completed / total) * 1000) / 10 : 0
+    const maxOverdueDays = maxOverdueRow.max_days || 0
+
+    const { level, score, factors } = calculateRiskLevel({
+      overdueCount: overdueTasks.length,
+      maxOverdueDays,
+      dueSoonCount: dueSoonTasks.length,
+      supervisingCount: supervisingTasks.length,
+      longNoUpdateCount: longNoUpdateTasks.length,
+      completionRate,
+      total,
+    })
+
+    const deptRow = db.prepare('SELECT is_active FROM departments WHERE name = ?').get(department) as { is_active: number } | undefined
+
+    const stats: DepartmentRiskStats = {
+      department,
+      isActive: deptRow ? deptRow.is_active === 1 : true,
+      total,
+      completed,
+      completionRate,
+      overdueCount: overdueTasks.length,
+      maxOverdueDays,
+      dueSoonCount: dueSoonTasks.length,
+      supervisingCount: supervisingTasks.length,
+      longNoUpdateCount: longNoUpdateTasks.length,
+      riskLevel: level,
+      riskScore: score,
+      riskFactors: factors,
+    }
+
+    const detail: DepartmentRiskDetail = {
+      department,
+      stats,
+      overdueTasks,
+      dueSoonTasks,
+      supervisingTasks,
+      longNoUpdateTasks,
+      riskTasks,
+    }
+
+    res.json({ success: true, data: detail })
+  } catch (error) {
+    console.error('Get department risk detail error:', error)
+    res.status(500).json({ success: false, error: '获取科室风险详情失败' })
   }
 })
 

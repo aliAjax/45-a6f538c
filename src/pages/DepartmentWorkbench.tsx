@@ -12,14 +12,18 @@ import {
   Check,
   ListTodo,
   RefreshCw,
+  ShieldAlert,
+  BellRing,
+  Clock3,
+  Activity,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import StatusBadge from '../components/StatusBadge'
-import type { Task, BatchUpdateTaskResult } from '../../shared/types'
+import type { Task, BatchUpdateTaskResult, RiskLevel, DepartmentRiskDetail } from '../../shared/types'
 import { cn } from '../lib/utils'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 
-type QueueType = 'pending' | 'overdue' | 'dueThisWeek' | 'completed'
+type QueueType = 'pending' | 'overdue' | 'dueThisWeek' | 'completed' | 'risk'
 
 const queueConfig: Record<QueueType, {
   label: string
@@ -56,6 +60,13 @@ const queueConfig: Record<QueueType, {
     bgClass: 'bg-green-50',
     borderClass: 'border-green-200',
   },
+  risk: {
+    label: '风险研判',
+    icon: ShieldAlert,
+    colorClass: 'text-rose-600',
+    bgClass: 'bg-rose-50',
+    borderClass: 'border-rose-200',
+  },
 }
 
 export default function DepartmentWorkbench() {
@@ -63,13 +74,18 @@ export default function DepartmentWorkbench() {
   const navigate = useNavigate()
   const {
     departments,
+    allTaskDepartments,
     departmentWorkbench,
+    departmentRiskDetail,
     fetchDepartments,
+    fetchDepartmentTaskStats,
     fetchDepartmentWorkbench,
+    fetchDepartmentRiskDetail,
     batchUpdateTasks,
   } = useAppStore()
 
   const urlDepartment = searchParams.get('department') || ''
+  const urlTab = searchParams.get('tab') || 'pending'
 
   const [selectedDepartment, setSelectedDepartment] = useState(urlDepartment)
   const [showDeptDropdown, setShowDeptDropdown] = useState(false)
@@ -81,11 +97,17 @@ export default function DepartmentWorkbench() {
   const [batchLoading, setBatchLoading] = useState(false)
   const [batchResults, setBatchResults] = useState<BatchUpdateTaskResult[] | null>(null)
   const [batchError, setBatchError] = useState<string | null>(null)
-  const [activeQueue, setActiveQueue] = useState<QueueType>('pending')
+  const [activeQueue, setActiveQueue] = useState<QueueType>(
+    urlTab === 'risk' ? 'risk' : urlTab === 'overdue' ? 'overdue' : urlTab === 'dueThisWeek' ? 'dueThisWeek' : urlTab === 'completed' ? 'completed' : 'pending'
+  )
+
+  const isDeptActive = (dept: string) => departments.includes(dept)
+  const dropdownDepartments = allTaskDepartments.length > 0 ? allTaskDepartments : departments
 
   useEffect(() => {
     fetchDepartments()
-  }, [fetchDepartments])
+    fetchDepartmentTaskStats()
+  }, [fetchDepartments, fetchDepartmentTaskStats])
 
   useEffect(() => {
     if (departments.length > 0 && !selectedDepartment) {
@@ -96,15 +118,31 @@ export default function DepartmentWorkbench() {
   useEffect(() => {
     if (selectedDepartment) {
       fetchDepartmentWorkbench(selectedDepartment)
+      fetchDepartmentRiskDetail(selectedDepartment)
       setSelectedTaskIds(new Set())
     }
-  }, [selectedDepartment, fetchDepartmentWorkbench])
+  }, [selectedDepartment, fetchDepartmentWorkbench, fetchDepartmentRiskDetail])
 
   useEffect(() => {
-    if (urlDepartment !== selectedDepartment && departments.includes(urlDepartment)) {
+    if (urlDepartment !== selectedDepartment && dropdownDepartments.includes(urlDepartment)) {
       setSelectedDepartment(urlDepartment)
     }
-  }, [urlDepartment, selectedDepartment, departments])
+  }, [urlDepartment, selectedDepartment, dropdownDepartments])
+
+  useEffect(() => {
+    const validTabs: QueueType[] = ['pending', 'overdue', 'dueThisWeek', 'completed', 'risk']
+    const tab = urlTab as QueueType
+    if (validTabs.includes(tab) && tab !== activeQueue) {
+      setActiveQueue(tab)
+    }
+  }, [urlTab, activeQueue])
+
+  const handleQueueChange = (queue: QueueType) => {
+    setActiveQueue(queue)
+    const params = new URLSearchParams(searchParams)
+    params.set('tab', queue)
+    setSearchParams(params)
+  }
 
   const handleDepartmentChange = (dept: string) => {
     setSelectedDepartment(dept)
@@ -116,6 +154,9 @@ export default function DepartmentWorkbench() {
   }
 
   const getTasksForQueue = (queue: QueueType): Task[] => {
+    if (queue === 'risk') {
+      return departmentRiskDetail?.riskTasks || []
+    }
     if (!departmentWorkbench) return []
     switch (queue) {
       case 'pending':
@@ -232,6 +273,7 @@ export default function DepartmentWorkbench() {
   const handleRefresh = () => {
     if (selectedDepartment) {
       fetchDepartmentWorkbench(selectedDepartment)
+      fetchDepartmentRiskDetail(selectedDepartment)
     }
   }
 
@@ -301,20 +343,32 @@ export default function DepartmentWorkbench() {
                   onClick={() => setShowDeptDropdown(false)}
                 />
                 <div className="absolute top-full left-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-lg z-20 py-1 max-h-60 overflow-y-auto">
-                  {departments.map((dept) => (
-                    <button
-                      key={dept}
-                      onClick={() => handleDepartmentChange(dept)}
-                      className={cn(
-                        'w-full px-4 py-2.5 text-left text-sm transition-colors',
-                        selectedDepartment === dept
-                          ? 'bg-primary-50 text-primary-700 font-medium'
-                          : 'text-slate-700 hover:bg-slate-50'
-                      )}
-                    >
-                      {dept}
-                    </button>
-                  ))}
+                  {dropdownDepartments.map((dept) => {
+                    const active = isDeptActive(dept)
+                    return (
+                      <button
+                        key={dept}
+                        onClick={() => handleDepartmentChange(dept)}
+                        className={cn(
+                          'w-full px-4 py-2.5 text-left text-sm transition-colors',
+                          selectedDepartment === dept
+                            ? 'bg-primary-50 text-primary-700 font-medium'
+                            : active
+                            ? 'text-slate-700 hover:bg-slate-50'
+                            : 'text-slate-400 hover:bg-slate-50'
+                        )}
+                      >
+                        <span className="flex items-center gap-2">
+                          {dept}
+                          {!active && (
+                            <span className="text-xs px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded">
+                              已停用
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    )
+                  })}
                 </div>
               </>
             )}
@@ -330,17 +384,22 @@ export default function DepartmentWorkbench() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {(Object.keys(queueConfig) as QueueType[]).map((queue) => {
           const config = queueConfig[queue]
           const Icon = config.icon
-          const count = departmentWorkbench?.stats[queue] ?? 0
+          let count = 0
+          if (queue === 'risk') {
+            count = departmentRiskDetail?.riskTasks?.length ?? 0
+          } else {
+            count = departmentWorkbench?.stats[queue] ?? 0
+          }
           const isActive = activeQueue === queue
 
           return (
             <button
               key={queue}
-              onClick={() => setActiveQueue(queue)}
+              onClick={() => handleQueueChange(queue)}
               className={cn(
                 'p-4 rounded-2xl border text-left transition-all duration-200',
                 isActive
@@ -374,66 +433,73 @@ export default function DepartmentWorkbench() {
         })}
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            {(() => {
-              const config = queueConfig[activeQueue]
-              const Icon = config.icon
-              return (
-                <>
-                  <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center', config.bgClass)}>
-                    <Icon className={cn('w-5 h-5', config.colorClass)} />
-                  </div>
-                  <div>
-                    <h2 className="font-semibold text-slate-800">{config.label}</h2>
-                    <p className="text-xs text-slate-500">
-                      共 {activeTasks.length} 条事项
-                    </p>
-                  </div>
-                </>
-              )
-            })()}
+      {activeQueue === 'risk' ? (
+        <RiskView
+          riskDetail={departmentRiskDetail}
+          onTaskClick={handleTaskClick}
+        />
+      ) : (
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {(() => {
+                const config = queueConfig[activeQueue]
+                const Icon = config.icon
+                return (
+                  <>
+                    <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center', config.bgClass)}>
+                      <Icon className={cn('w-5 h-5', config.colorClass)} />
+                    </div>
+                    <div>
+                      <h2 className="font-semibold text-slate-800">{config.label}</h2>
+                      <p className="text-xs text-slate-500">
+                        共 {activeTasks.length} 条事项
+                      </p>
+                    </div>
+                  </>
+                )
+              })()}
+            </div>
+
+            {activeQueue !== 'completed' && selectableTasks.length > 0 && (
+              <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someSelected && !allSelected
+                  }}
+                  onChange={toggleSelectAll}
+                  className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                />
+                <span>全选当前页</span>
+              </label>
+            )}
           </div>
 
-          {activeQueue !== 'completed' && selectableTasks.length > 0 && (
-            <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={allSelected}
-                ref={(el) => {
-                  if (el) el.indeterminate = someSelected && !allSelected
-                }}
-                onChange={toggleSelectAll}
-                className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
-              />
-              <span>全选当前页</span>
-            </label>
-          )}
-        </div>
-
-        <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
-          {activeTasks.length === 0 ? (
-            <div className="py-16 text-center">
-              <div className="w-16 h-16 rounded-full bg-slate-50 flex items-center justify-center mx-auto mb-3">
-                <CheckSquare className="w-8 h-8 text-slate-300" />
+          <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
+            {activeTasks.length === 0 ? (
+              <div className="py-16 text-center">
+                <div className="w-16 h-16 rounded-full bg-slate-50 flex items-center justify-center mx-auto mb-3">
+                  <CheckSquare className="w-8 h-8 text-slate-300" />
+                </div>
+                <p className="text-slate-500 text-sm">暂无事项</p>
               </div>
-              <p className="text-slate-500 text-sm">暂无事项</p>
-            </div>
-          ) : (
-            activeTasks.map((task) => (
-              <WorkbenchTaskItem
-                key={task.id}
-                task={task}
-                selected={selectedTaskIds.has(task.id)}
-                selectable={activeQueue !== 'completed'}
-                onToggleSelect={() => toggleSelectTask(task.id)}
-                onClick={() => handleTaskClick(task)}
-              />
-            ))
-          )}
+            ) : (
+              activeTasks.map((task) => (
+                <WorkbenchTaskItem
+                  key={task.id}
+                  task={task}
+                  selected={selectedTaskIds.has(task.id)}
+                  selectable={activeQueue !== 'completed'}
+                  onToggleSelect={() => toggleSelectTask(task.id)}
+                  onClick={() => handleTaskClick(task)}
+                />
+              ))
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {showBatchModal && (
         <BatchUpdateModal
@@ -454,6 +520,331 @@ export default function DepartmentWorkbench() {
           error={batchError}
         />
       )}
+    </div>
+  )
+}
+
+function getRiskLevelConfig(level: RiskLevel) {
+  switch (level) {
+    case 'high':
+      return {
+        label: '高风险',
+        colorClass: 'text-red-600',
+        bgClass: 'bg-red-50',
+        borderClass: 'border-red-200',
+        dotClass: 'bg-red-500',
+      }
+    case 'medium':
+      return {
+        label: '中风险',
+        colorClass: 'text-amber-600',
+        bgClass: 'bg-amber-50',
+        borderClass: 'border-amber-200',
+        dotClass: 'bg-amber-500',
+      }
+    case 'low':
+      return {
+        label: '低风险',
+        colorClass: 'text-green-600',
+        bgClass: 'bg-green-50',
+        borderClass: 'border-green-200',
+        dotClass: 'bg-green-500',
+      }
+  }
+}
+
+function RiskView({
+  riskDetail,
+  onTaskClick,
+}: {
+  riskDetail: DepartmentRiskDetail | null
+  onTaskClick: (task: Task) => void
+}) {
+  if (!riskDetail) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
+        <div className="text-slate-500">加载中...</div>
+      </div>
+    )
+  }
+
+  const { stats, riskTasks } = riskDetail
+  const riskConfig = getRiskLevelConfig(stats.riskLevel)
+
+  const riskMetrics = [
+    {
+      label: '逾期事项',
+      value: stats.overdueCount,
+      subValue: stats.maxOverdueDays > 0 ? `最长${stats.maxOverdueDays}天` : '',
+      icon: AlertTriangle,
+      color: 'red',
+      tasks: riskDetail.overdueTasks,
+    },
+    {
+      label: '临期事项',
+      value: stats.dueSoonCount,
+      subValue: '未来3天内',
+      icon: Clock3,
+      color: 'amber',
+      tasks: riskDetail.dueSoonTasks,
+    },
+    {
+      label: '督办中事项',
+      value: stats.supervisingCount,
+      subValue: '需重点跟进',
+      icon: BellRing,
+      color: 'rose',
+      tasks: riskDetail.supervisingTasks,
+    },
+    {
+      label: '长期未更新',
+      value: stats.longNoUpdateCount,
+      subValue: '超过15天',
+      icon: Activity,
+      color: 'violet',
+      tasks: riskDetail.longNoUpdateTasks,
+    },
+  ]
+
+  const colorMap: Record<string, { colorClass: string; bgClass: string; borderClass: string }> = {
+    red: { colorClass: 'text-red-600', bgClass: 'bg-red-50', borderClass: 'border-red-200' },
+    amber: { colorClass: 'text-amber-600', bgClass: 'bg-amber-50', borderClass: 'border-amber-200' },
+    rose: { colorClass: 'text-rose-600', bgClass: 'bg-rose-50', borderClass: 'border-rose-200' },
+    violet: { colorClass: 'text-violet-600', bgClass: 'bg-violet-50', borderClass: 'border-violet-200' },
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className={cn(
+        'rounded-2xl border p-5',
+        riskConfig.bgClass,
+        riskConfig.borderClass
+      )}>
+        <div className="flex flex-wrap items-center gap-6">
+          <div className="flex items-center gap-4">
+            <div className={cn('w-14 h-14 rounded-2xl flex items-center justify-center', 'bg-white/80')}>
+              <ShieldAlert className={cn('w-7 h-7', riskConfig.colorClass)} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-semibold', 'bg-white/80', riskConfig.colorClass)}>
+                  <span className={cn('w-2 h-2 rounded-full', riskConfig.dotClass)} />
+                  {riskConfig.label}
+                </span>
+                {!stats.isActive && (
+                  <span className="text-xs px-2 py-0.5 bg-white/60 text-slate-500 rounded">
+                    已停用科室
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-600">
+                风险得分 {stats.riskScore} 分
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-6 flex-1">
+            <div>
+              <p className="text-xs text-slate-500 mb-1">完成率</p>
+              <p className={cn('text-2xl font-bold', stats.completionRate >= 80 ? 'text-green-600' : stats.completionRate >= 60 ? 'text-amber-600' : 'text-red-600')}>
+                {stats.completionRate}%
+              </p>
+            </div>
+            <div className="flex-1 max-w-xs">
+              <div className="h-2.5 bg-white/50 rounded-full overflow-hidden">
+                <div
+                  className={cn(
+                    'h-full rounded-full transition-all',
+                    stats.completionRate >= 80 ? 'bg-green-500' : stats.completionRate >= 60 ? 'bg-amber-500' : 'bg-red-500'
+                  )}
+                  style={{ width: `${stats.completionRate}%` }}
+                />
+              </div>
+              <p className="text-xs text-slate-500 mt-1.5">
+                已完成 {stats.completed} / 共 {stats.total} 项
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 pt-4 border-t border-white/60">
+          <p className="text-xs font-medium text-slate-600 mb-2">风险因素：</p>
+          <div className="flex flex-wrap gap-2">
+            {stats.riskFactors.map((factor, i) => (
+              <span
+                key={i}
+                className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs bg-white/70 text-slate-700"
+              >
+                {factor}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {riskMetrics.map((metric) => {
+          const colors = colorMap[metric.color]
+          const Icon = metric.icon
+          return (
+            <div
+              key={metric.label}
+              className={cn(
+                'p-4 rounded-2xl border bg-white transition-all hover:shadow-sm',
+                colors.borderClass
+              )}
+            >
+              <div className="flex items-start gap-3">
+                <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0', colors.bgClass)}>
+                  <Icon className={cn('w-5 h-5', colors.colorClass)} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs text-slate-500 mb-0.5">{metric.label}</p>
+                  <p className={cn('text-xl font-bold', colors.colorClass)}>
+                    {metric.value}
+                  </p>
+                  {metric.subValue && (
+                    <p className="text-xs text-slate-400 mt-0.5">{metric.subValue}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-rose-50 flex items-center justify-center">
+              <ShieldAlert className="w-5 h-5 text-rose-600" />
+            </div>
+            <div>
+              <h2 className="font-semibold text-slate-800">风险事项清单</h2>
+              <p className="text-xs text-slate-500">
+                共 {riskTasks.length} 项需关注的风险事项
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="divide-y divide-slate-100 max-h-[500px] overflow-y-auto">
+          {riskTasks.length === 0 ? (
+            <div className="py-16 text-center">
+              <div className="w-16 h-16 rounded-full bg-green-50 flex items-center justify-center mx-auto mb-3">
+                <CheckCircle className="w-8 h-8 text-green-500" />
+              </div>
+              <p className="text-slate-500 text-sm">暂无风险事项，状态良好</p>
+            </div>
+          ) : (
+            riskTasks.map((task) => (
+              <RiskTaskItem
+                key={task.id}
+                task={task}
+                riskDetail={riskDetail}
+                onClick={() => onTaskClick(task)}
+              />
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RiskTaskItem({
+  task,
+  riskDetail,
+  onClick,
+}: {
+  task: Task
+  riskDetail: DepartmentRiskDetail
+  onClick: () => void
+}) {
+  const isOverdue = riskDetail.overdueTasks.some((t) => t.id === task.id)
+  const isDueSoon = riskDetail.dueSoonTasks.some((t) => t.id === task.id)
+  const isSupervising = riskDetail.supervisingTasks.some((t) => t.id === task.id)
+  const isLongNoUpdate = riskDetail.longNoUpdateTasks.some((t) => t.id === task.id)
+
+  const tags: { label: string; color: string }[] = []
+  if (isOverdue) tags.push({ label: '逾期', color: 'red' })
+  if (isSupervising) tags.push({ label: '督办中', color: 'rose' })
+  if (isDueSoon && !isOverdue) tags.push({ label: '临期', color: 'amber' })
+  if (isLongNoUpdate) tags.push({ label: '长期未更新', color: 'violet' })
+
+  const tagColorMap: Record<string, string> = {
+    red: 'bg-red-100 text-red-700',
+    amber: 'bg-amber-100 text-amber-700',
+    rose: 'bg-rose-100 text-rose-700',
+    violet: 'bg-violet-100 text-violet-700',
+  }
+
+  const daysLeft = getDaysLeft(task.deadline)
+
+  function getDaysLeft(deadline: string): number {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const deadlineDate = new Date(deadline)
+    deadlineDate.setHours(0, 0, 0, 0)
+    const diff = deadlineDate.getTime() - today.getTime()
+    return Math.ceil(diff / (1000 * 60 * 60 * 24))
+  }
+
+  const isOverdueTask = daysLeft < 0 && task.status !== 'completed'
+
+  return (
+    <div
+      className="p-4 hover:bg-slate-50 transition-colors cursor-pointer"
+      onClick={onClick}
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+            {tags.map((tag) => (
+              <span
+                key={tag.label}
+                className={cn(
+                  'text-[10px] font-medium px-1.5 py-0.5 rounded',
+                  tagColorMap[tag.color]
+                )}
+              >
+                {tag.label}
+              </span>
+            ))}
+            <StatusBadge status={task.status} size="sm" />
+            {task.meetingTitle && (
+              <span className="text-xs text-slate-500 truncate">
+                来源：{task.meetingTitle}
+              </span>
+            )}
+          </div>
+
+          <p className="text-sm font-medium text-slate-800 line-clamp-1 mb-2 group-hover:text-primary-700 transition-colors">
+            {task.content}
+          </p>
+
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+            <span
+              className={cn(
+                'inline-flex items-center gap-1 font-medium',
+                isOverdueTask ? 'text-red-600' : 'text-slate-500'
+              )}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              截止：{task.deadline}
+              {isOverdueTask && ` (逾期${Math.abs(daysLeft)}天)`}
+              {!isOverdueTask && daysLeft >= 0 && ` (剩余${daysLeft}天)`}
+            </span>
+          </div>
+
+          {task.progress && (
+            <p className="mt-2 text-xs text-slate-600 line-clamp-1">
+              <span className="text-slate-400">最新进展：</span>
+              {task.progress}
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

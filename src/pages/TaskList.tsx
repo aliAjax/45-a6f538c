@@ -4,24 +4,57 @@ import {
   Building2,
   Filter,
   ChevronDown,
+  ShieldAlert,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import TaskCard from '../components/TaskCard'
 import TaskUpdateModal from '../components/TaskUpdateModal'
-import type { Task } from '../../shared/types'
+import type { Task, RiskLevel } from '../../shared/types'
 import { cn } from '../lib/utils'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
+
+function getRiskLevelConfig(level: RiskLevel) {
+  switch (level) {
+    case 'high':
+      return {
+        label: '高风险',
+        colorClass: 'text-red-600',
+        bgClass: 'bg-red-50',
+        borderClass: 'border-red-200',
+        dotClass: 'bg-red-500',
+      }
+    case 'medium':
+      return {
+        label: '中风险',
+        colorClass: 'text-amber-600',
+        bgClass: 'bg-amber-50',
+        borderClass: 'border-amber-200',
+        dotClass: 'bg-amber-500',
+      }
+    case 'low':
+      return {
+        label: '低风险',
+        colorClass: 'text-green-600',
+        bgClass: 'bg-green-50',
+        borderClass: 'border-green-200',
+        dotClass: 'bg-green-500',
+      }
+  }
+}
 
 export default function TaskList() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   const {
     tasks,
     tasksTotal,
     departments,
     allTaskDepartments,
+    departmentRiskStats,
     fetchTasks,
     fetchDepartments,
     fetchDepartmentTaskStats,
+    fetchDepartmentRiskStats,
   } = useAppStore()
 
   const urlDepartment = searchParams.get('department') || 'all'
@@ -36,7 +69,8 @@ export default function TaskList() {
   useEffect(() => {
     fetchDepartments()
     fetchDepartmentTaskStats()
-  }, [fetchDepartments, fetchDepartmentTaskStats])
+    fetchDepartmentRiskStats()
+  }, [fetchDepartments, fetchDepartmentTaskStats, fetchDepartmentRiskStats])
 
   useEffect(() => {
     if (urlDepartment !== selectedDepartment) {
@@ -176,9 +210,18 @@ export default function TaskList() {
             ))}
           </div>
 
-          <div className="ml-auto text-sm text-slate-500">
-            共 <span className="font-medium text-slate-700">{tasksTotal}</span>{' '}
-            条事项
+          <div className="ml-auto flex items-center gap-4">
+            <button
+              onClick={() => navigate('/workbench?tab=risk')}
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-rose-600 hover:text-rose-700 transition-colors"
+            >
+              <ShieldAlert className="w-4 h-4" />
+              风险研判
+            </button>
+            <div className="text-sm text-slate-500">
+              共 <span className="font-medium text-slate-700">{tasksTotal}</span>{' '}
+              条事项
+            </div>
           </div>
         </div>
       </div>
@@ -191,12 +234,14 @@ export default function TaskList() {
                 ? tasksTotal
                 : tasks.filter((t) => t.department === dept).length
             const active = isDeptActive(dept)
+            const riskStat = departmentRiskStats.find(r => r.department === dept)
+            const riskConfig = riskStat ? getRiskLevelConfig(riskStat.riskLevel) : null
             return (
               <button
                 key={dept}
                 onClick={() => handleDepartmentChange(dept)}
                 className={cn(
-                  'px-4 py-2 rounded-xl text-sm font-medium transition-all',
+                  'px-4 py-2 rounded-xl text-sm font-medium transition-all relative',
                   selectedDepartment === dept
                     ? 'bg-primary-600 text-white shadow-sm shadow-primary-200'
                     : active
@@ -205,6 +250,14 @@ export default function TaskList() {
                 )}
               >
                 <span className="flex items-center gap-1.5">
+                  {dept !== 'all' && riskConfig && (
+                    <span
+                      className={cn(
+                        'w-2 h-2 rounded-full',
+                        selectedDepartment === dept ? 'bg-white' : riskConfig.dotClass
+                      )}
+                    />
+                  )}
                   {dept === 'all' ? '全部' : dept}
                   {!active && dept !== 'all' && (
                     <span className="text-[10px] opacity-70">(停用)</span>

@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import db from '../db.js'
-import type { Department, CreateDepartmentRequest, UpdateDepartmentRequest, DepartmentStats } from '../../shared/types.js'
+import type { Department, CreateDepartmentRequest, UpdateDepartmentRequest, DepartmentStats, DepartmentRiskStats, RiskLevel } from '../../shared/types.js'
 
 const router = Router()
 
@@ -238,6 +238,157 @@ router.get('/stats/tasks', (_req: Request, res: Response) => {
   } catch (error) {
     console.error('Get department task stats error:', error)
     res.status(500).json({ success: false, error: '获取科室任务统计失败' })
+  }
+})
+
+function getDueSoonRange(): { start: string; end: string } {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const endDate = new Date(today)
+  endDate.setDate(endDate.getDate() + 3)
+  return {
+    start: today.toISOString().split('T')[0],
+    end: endDate.toISOString().split('T')[0],
+  }
+}
+
+function getLongNoUpdateDate(): string {
+  const now = new Date()
+  const date = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  date.setDate(date.getDate() - 15)
+  return date.toISOString().split('T')[0]
+}
+
+function calculateRiskLevel(stats: {
+  overdueCount: number
+  maxOverdueDays: number
+  dueSoonCount: number
+  supervisingCount: number
+  longNoUpdateCount: number
+  completionRate: number
+  total: number
+}): { level: RiskLevel; score: number; factors: string[] } {
+  let score = 0
+  const factors: string[] = []
+
+  if (stats.overdueCount > 0) {
+    const overdueScore = Math.min(stats.overdueCount * 10 + stats.maxOverdueDays, 40)
+    score += overdueScore
+    factors.push(`逾期 ${stats.overdueCount} 项，最长逾期 ${stats.maxOverdueDays} 天`)
+  }
+
+  if (stats.supervisingCount > 0) {
+    const superviseScore = Math.min(stats.supervisingCount * 15, 30)
+    score += superviseScore
+    factors.push(`督办中 ${stats.supervisingCount} 项`)
+  }
+
+  if (stats.longNoUpdateCount > 0) {
+    const longNoUpdateScore = Math.min(stats.longNoUpdateCount * 8, 25)
+    score += longNoUpdateScore
+    factors.push(`长期未更新 ${stats.longNoUpdateCount} 项`)
+  }
+
+  if (stats.dueSoonCount > 0) {
+    const dueSoonScore = Math.min(stats.dueSoonCount * 3, 15)
+    score += dueSoonScore
+    factors.push(`临期 ${stats.dueSoonCount} 项`)
+  }
+
+  if (stats.total > 0 && stats.completionRate < 60) {
+    score += 15
+    factors.push(`完成率仅 ${stats.completionRate.toFixed(1)}%`)
+  }
+
+  let level: RiskLevel = 'low'
+  if (score >= 40) {
+    level = 'high'
+  } else if (score >= 15) {
+    level = 'medium'
+  }
+
+  if (factors.length === 0) {
+    factors.push('风险可控')
+  }
+
+  return { level: level as RiskLevel, score, factors }
+}
+
+router.get('/stats/risk', (_req: Request, res: Response) => {
+  try {
+    const today = new Date().toISOString().split('T')[0]
+    const { start: dueSoonStart, end: dueSoonEnd } = getDueSoonRange()
+    const longNoUpdateDate = getLongNoUpdateDate()
+
+    const rows = db.prepare(`
+      SELECT
+        t.department,
+        COUNT(*) as total,
+        SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN t.status != 'completed' AND t.deadline < ? THEN 1 ELSE 0 END) as overdue_count,
+        MAX(CASE WHEN t.status != 'completed' AND t.deadline < ?
+            THEN CAST((julianday(?) - julianday(t.deadline)) AS INTEGER)
+            ELSE 0 END) as max_overdue_days,
+        SUM(CASE WHEN t.status != 'completed' AND t.deadline >= ? AND t.deadline <= ? THEN 1 ELSE 0 END) as due_soon_count,
+        SUM(CASE WHEN EXISTS (
+            SELECT 1 FROM task_supervisions ts
+            WHERE ts.task_id = t.id AND ts.status = 'active'
+          ) THEN 1 ELSE 0 END) as supervising_count,
+        SUM(CASE WHEN t.status != 'completed' AND t.updated_at < ? THEN 1 ELSE 0 END) as long_no_update_count
+      FROM tasks t
+      GROUP BY t.department
+      ORDER BY
+        (SELECT COALESCE(sort_order, 9999) FROM departments d WHERE d.name = t.department) ASC,
+        t.department ASC
+    `).all(today, today, today, dueSoonStart, dueSoonEnd, longNoUpdateDate) as any[]
+
+    const deptMap = new Map<string, boolean>()
+    const deptRows = db.prepare('SELECT name, is_active FROM departments').all() as { name: string; is_active: number }[]
+    deptRows.forEach((d) => deptMap.set(d.name, d.is_active === 1))
+
+    const stats: DepartmentRiskStats[] = rows.map((row) => {
+      const total = row.total
+      const completed = row.completed
+      const completionRate = total > 0 ? Math.round((completed / total) * 1000) / 10 : 0
+      const overdueCount = row.overdue_count
+      const maxOverdueDays = row.max_overdue_days || 0
+      const dueSoonCount = row.due_soon_count
+      const supervisingCount = row.supervising_count
+      const longNoUpdateCount = row.long_no_update_count
+
+      const { level, score, factors } = calculateRiskLevel({
+        overdueCount,
+        maxOverdueDays,
+        dueSoonCount,
+        supervisingCount,
+        longNoUpdateCount,
+        completionRate,
+        total,
+      })
+
+      return {
+        department: row.department,
+        isActive: deptMap.get(row.department) ?? true,
+        total,
+        completed,
+        completionRate,
+        overdueCount,
+        maxOverdueDays,
+        dueSoonCount,
+        supervisingCount,
+        longNoUpdateCount,
+        riskLevel: level,
+        riskScore: score,
+        riskFactors: factors,
+      }
+    })
+
+    stats.sort((a, b) => b.riskScore - a.riskScore)
+
+    res.json({ success: true, data: stats })
+  } catch (error) {
+    console.error('Get department risk stats error:', error)
+    res.status(500).json({ success: false, error: '获取科室风险统计失败' })
   }
 })
 

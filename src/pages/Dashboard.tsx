@@ -7,14 +7,44 @@ import {
   ArrowRight,
   Building2,
   BellRing,
+  ShieldAlert,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import StatCard from '../components/StatCard'
 import TaskCard from '../components/TaskCard'
 import TaskUpdateModal from '../components/TaskUpdateModal'
-import type { Task } from '../../shared/types'
+import type { Task, RiskLevel } from '../../shared/types'
 import { useNavigate } from 'react-router-dom'
 import { cn } from '../lib/utils'
+
+function getRiskLevelConfig(level: RiskLevel) {
+  switch (level) {
+    case 'high':
+      return {
+        label: '高风险',
+        colorClass: 'text-red-600',
+        bgClass: 'bg-red-50',
+        borderClass: 'border-red-200',
+        dotClass: 'bg-red-500',
+      }
+    case 'medium':
+      return {
+        label: '中风险',
+        colorClass: 'text-amber-600',
+        bgClass: 'bg-amber-50',
+        borderClass: 'border-amber-200',
+        dotClass: 'bg-amber-500',
+      }
+    case 'low':
+      return {
+        label: '低风险',
+        colorClass: 'text-green-600',
+        bgClass: 'bg-green-50',
+        borderClass: 'border-green-200',
+        dotClass: 'bg-green-500',
+      }
+  }
+}
 
 export default function Dashboard() {
   const navigate = useNavigate()
@@ -24,12 +54,14 @@ export default function Dashboard() {
     thisWeekTasks,
     supervisingTasks,
     departmentTaskStats,
+    departmentRiskStats,
     departments,
     fetchStats,
     fetchOverdueTasks,
     fetchThisWeekTasks,
     fetchSupervisingTasks,
     fetchDepartmentTaskStats,
+    fetchDepartmentRiskStats,
     fetchDepartments,
   } = useAppStore()
 
@@ -42,8 +74,9 @@ export default function Dashboard() {
     fetchThisWeekTasks()
     fetchSupervisingTasks()
     fetchDepartmentTaskStats()
+    fetchDepartmentRiskStats()
     fetchDepartments()
-  }, [fetchStats, fetchOverdueTasks, fetchThisWeekTasks, fetchSupervisingTasks, fetchDepartmentTaskStats, fetchDepartments])
+  }, [fetchStats, fetchOverdueTasks, fetchThisWeekTasks, fetchSupervisingTasks, fetchDepartmentTaskStats, fetchDepartmentRiskStats, fetchDepartments])
 
   const handleTaskClick = (task: Task) => {
     setSelectedTask(task)
@@ -250,13 +283,23 @@ export default function Dashboard() {
               </p>
             </div>
           </div>
-          <button
-            onClick={() => navigate('/tasks')}
-            className="text-sm text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1 transition-colors"
-          >
-            查看全部
-            <ArrowRight className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate('/workbench?tab=risk')}
+              className="text-sm text-rose-600 hover:text-rose-700 font-medium flex items-center gap-1 transition-colors"
+            >
+              <ShieldAlert className="w-4 h-4" />
+              风险研判
+              <ArrowRight className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => navigate('/tasks')}
+              className="text-sm text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-1 transition-colors"
+            >
+              查看全部
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         <div className="p-4">
@@ -275,6 +318,11 @@ export default function Dashboard() {
                 const completedRate = stat.total > 0
                   ? Math.round((stat.completed / stat.total) * 100)
                   : 0
+                const riskStat = departmentRiskStats.find(
+                  (r) => r.department === stat.department
+                )
+                const riskLevel = riskStat?.riskLevel || 'low'
+                const riskConfig = getRiskLevelConfig(riskLevel)
 
                 return (
                   <button
@@ -293,6 +341,22 @@ export default function Dashboard() {
                         {!isActive && (
                           <span className="text-[10px] px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded">
                             已停用
+                          </span>
+                        )}
+                        {riskStat && (
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              navigate(`/workbench?department=${encodeURIComponent(stat.department)}&tab=risk`)
+                            }}
+                            className={cn(
+                              'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium cursor-pointer',
+                              riskConfig.bgClass,
+                              riskConfig.colorClass
+                            )}
+                          >
+                            <span className={cn('w-1.5 h-1.5 rounded-full', riskConfig.dotClass)} />
+                            {riskConfig.label}
                           </span>
                         )}
                       </div>
@@ -317,6 +381,13 @@ export default function Dashboard() {
                         <span className="text-slate-500">逾期</span>
                         <span className="font-medium text-red-600">{stat.overdue}</span>
                       </div>
+                      {riskStat && riskStat.supervisingCount > 0 && (
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+                          <span className="text-slate-500">督办</span>
+                          <span className="font-medium text-rose-600">{riskStat.supervisingCount}</span>
+                        </div>
+                      )}
                       <div className="ml-auto flex items-center gap-1.5">
                         <span className="text-slate-500">完成率</span>
                         <span className="font-medium text-green-600">{completedRate}%</span>

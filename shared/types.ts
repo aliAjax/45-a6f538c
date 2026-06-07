@@ -151,6 +151,34 @@ export interface DepartmentStats {
   overdue: number
 }
 
+export type RiskLevel = 'high' | 'medium' | 'low'
+
+export interface DepartmentRiskStats {
+  department: string
+  isActive: boolean
+  total: number
+  completed: number
+  completionRate: number
+  overdueCount: number
+  maxOverdueDays: number
+  dueSoonCount: number
+  supervisingCount: number
+  longNoUpdateCount: number
+  riskLevel: RiskLevel
+  riskScore: number
+  riskFactors: string[]
+}
+
+export interface DepartmentRiskDetail {
+  department: string
+  stats: DepartmentRiskStats
+  overdueTasks: Task[]
+  dueSoonTasks: Task[]
+  supervisingTasks: Task[]
+  longNoUpdateTasks: Task[]
+  riskTasks: Task[]
+}
+
 export interface CalendarDayTasks {
   date: string
   tasks: Task[]
