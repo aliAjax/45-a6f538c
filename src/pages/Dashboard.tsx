@@ -9,7 +9,6 @@ import {
   BellRing,
   ShieldAlert,
   Layers,
-  Search,
   Calendar as CalendarIcon,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'

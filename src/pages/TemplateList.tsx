@@ -13,7 +13,6 @@ import {
   History,
   Clock,
   RotateCcw,
-  Check,
   ChevronRight,
   GitCompare,
 } from 'lucide-react'

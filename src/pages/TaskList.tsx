@@ -141,6 +141,27 @@ function setFilterToParams(filter: TaskFilter, searchParams: URLSearchParams): U
   return params
 }
 
+function filtersEqual(a: TaskFilter, b: TaskFilter): boolean {
+  return (
+    a.department === b.department &&
+    a.status === b.status &&
+    a.risk === b.risk &&
+    a.search === b.search &&
+    a.startDate === b.startDate &&
+    a.endDate === b.endDate &&
+    a.overdueOnly === b.overdueOnly &&
+    a.dueSoonOnly === b.dueSoonOnly &&
+    a.supervisingOnly === b.supervisingOnly
+  )
+}
+
+function getInvalidDepartments(view: TaskView, departments: string[]): string[] {
+  if (!view.filter.department || view.filter.department === 'all') {
+    return []
+  }
+  return departments.includes(view.filter.department) ? [] : [view.filter.department]
+}
+
 export default function TaskList() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -202,25 +223,28 @@ export default function TaskList() {
     if (urlView) {
       const view = taskViews.find((v) => v.id === Number(urlView))
       if (view) {
-        checkViewValidity(view)
-      }
-    }
-  }, [urlView, taskViews, departments])
+        const currentFilter = getFilterFromParams(searchParams)
+        if (!filtersEqual(currentFilter, view.filter)) {
+          const params = setFilterToParams(view.filter, searchParams)
+          params.set('view', String(view.id))
+          setFilter(view.filter)
+          setSearchParams(params)
+          return
+        }
 
-  const checkViewValidity = (view: TaskView) => {
-    const invalidDepts: string[] = []
-    if (view.filter.department && view.filter.department !== 'all') {
-      if (!departments.includes(view.filter.department)) {
-        invalidDepts.push(view.filter.department)
+        const invalidDepts = getInvalidDepartments(view, departments)
+        if (invalidDepts.length > 0) {
+          setWarningMessage(`视图"${view.name}"包含已失效的筛选条件：${invalidDepts.join('、')}，视图仍可使用但结果可能不符合预期。`)
+          setShowWarning(true)
+        } else {
+          setShowWarning(false)
+        }
       }
     }
-    if (invalidDepts.length > 0) {
-      setWarningMessage(`视图"${view.name}"包含已失效的筛选条件：${invalidDepts.join('、')}，视图仍可使用但结果可能不符合预期。`)
-      setShowWarning(true)
-    } else {
+    if (!urlView) {
       setShowWarning(false)
     }
-  }
+  }, [urlView, searchParams, taskViews, departments, setSearchParams])
 
   useEffect(() => {
     fetchTasks('all', 'all', 1, 50, '', filter)

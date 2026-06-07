@@ -36,7 +36,7 @@ export default function ViewSelector({
   defaultTargetPage = 'tasks',
   className,
 }: ViewSelectorProps) {
-  const { taskViews, departments, fetchTaskViews, createTaskView, deleteTaskView, validateTaskView } = useAppStore()
+  const { taskViews, departments, fetchTaskViews, createTaskView, deleteTaskView } = useAppStore()
   const [showDropdown, setShowDropdown] = useState(false)
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [viewName, setViewName] = useState('')

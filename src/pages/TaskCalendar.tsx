@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Calendar,
   ChevronLeft,
@@ -9,7 +9,6 @@ import {
   Clock,
   ListChecks,
   Edit3,
-  Layers,
   Search,
   BellRing,
   AlertTriangle,
@@ -26,18 +25,6 @@ import { useSearchParams } from 'react-router-dom'
 import { ApiError } from '../utils/api'
 
 const weekDays = ['日', '一', '二', '三', '四', '五', '六']
-
-const defaultFilter: TaskFilter = {
-  department: 'all',
-  status: 'all',
-  risk: '',
-  search: '',
-  startDate: '',
-  endDate: '',
-  overdueOnly: false,
-  dueSoonOnly: false,
-  supervisingOnly: false,
-}
 
 function getFilterFromParams(searchParams: URLSearchParams): TaskFilter {
   return {
@@ -115,6 +102,27 @@ function setFilterToParams(filter: TaskFilter, searchParams: URLSearchParams): U
   return params
 }
 
+function filtersEqual(a: TaskFilter, b: TaskFilter): boolean {
+  return (
+    a.department === b.department &&
+    a.status === b.status &&
+    a.risk === b.risk &&
+    a.search === b.search &&
+    a.startDate === b.startDate &&
+    a.endDate === b.endDate &&
+    a.overdueOnly === b.overdueOnly &&
+    a.dueSoonOnly === b.dueSoonOnly &&
+    a.supervisingOnly === b.supervisingOnly
+  )
+}
+
+function getInvalidDepartments(view: TaskView, departments: string[]): string[] {
+  if (!view.filter.department || view.filter.department === 'all') {
+    return []
+  }
+  return departments.includes(view.filter.department) ? [] : [view.filter.department]
+}
+
 export default function TaskCalendar() {
   const [searchParams, setSearchParams] = useSearchParams()
   const {
@@ -184,25 +192,30 @@ export default function TaskCalendar() {
     if (urlView) {
       const view = taskViews.find((v) => v.id === Number(urlView))
       if (view) {
-        checkViewValidity(view)
-      }
-    }
-  }, [searchParams.get('view'), taskViews, departments])
+        const currentFilter = getFilterFromParams(searchParams)
+        if (!filtersEqual(currentFilter, view.filter)) {
+          const params = setFilterToParams(view.filter, searchParams)
+          params.set('view', String(view.id))
+          params.set('year', String(currentYear))
+          params.set('month', String(currentMonth))
+          setFilter(view.filter)
+          setSearchParams(params)
+          return
+        }
 
-  const checkViewValidity = (view: TaskView) => {
-    const invalidDepts: string[] = []
-    if (view.filter.department && view.filter.department !== 'all') {
-      if (!departments.includes(view.filter.department)) {
-        invalidDepts.push(view.filter.department)
+        const invalidDepts = getInvalidDepartments(view, departments)
+        if (invalidDepts.length > 0) {
+          setWarningMessage(`视图"${view.name}"包含已失效的筛选条件：${invalidDepts.join('、')}，视图仍可使用但结果可能不符合预期。`)
+          setShowWarning(true)
+        } else {
+          setShowWarning(false)
+        }
       }
     }
-    if (invalidDepts.length > 0) {
-      setWarningMessage(`视图"${view.name}"包含已失效的筛选条件：${invalidDepts.join('、')}，视图仍可使用但结果可能不符合预期。`)
-      setShowWarning(true)
-    } else {
+    if (!urlView) {
       setShowWarning(false)
     }
-  }
+  }, [searchParams, taskViews, departments, currentYear, currentMonth, setSearchParams])
 
   useEffect(() => {
     fetchCalendarTasks(currentYear, currentMonth, filter.department, filter)
@@ -307,11 +320,6 @@ export default function TaskCalendar() {
   const handleTaskUpdated = () => {
     fetchCalendarTasks(currentYear, currentMonth, filter.department, filter)
   }
-
-  const allCalendarTasks = useMemo(() => {
-    if (!calendarData) return []
-    return calendarData.days.flatMap((day) => day.tasks)
-  }, [calendarData])
 
   const toggleSelectTask = (taskId: number) => {
     const newSelected = new Set(selectedTaskIds)

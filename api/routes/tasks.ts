@@ -409,7 +409,18 @@ router.get('/this-week', (_req: Request, res: Response) => {
 
 router.get('/calendar', (req: Request, res: Response) => {
   try {
-    const { year, month, department = 'all', search, supervisingOnly, status, overdueOnly, dueSoonOnly } = req.query
+    const {
+      year,
+      month,
+      department = 'all',
+      search,
+      supervisingOnly,
+      status,
+      startDate: filterStartDate,
+      endDate: filterEndDate,
+      overdueOnly,
+      dueSoonOnly,
+    } = req.query
 
     if (!year || !month) {
       return res.status(400).json({ success: false, error: '年份和月份不能为空' })
@@ -437,6 +448,16 @@ router.get('/calendar', (req: Request, res: Response) => {
       whereClause += ' AND (t.content LIKE ? OR m.title LIKE ?)'
       const searchTerm = `%${search.trim()}%`
       params.push(searchTerm, searchTerm)
+    }
+
+    if (filterStartDate && typeof filterStartDate === 'string' && filterStartDate.trim()) {
+      whereClause += ' AND date(t.deadline) >= date(?)'
+      params.push(filterStartDate.trim())
+    }
+
+    if (filterEndDate && typeof filterEndDate === 'string' && filterEndDate.trim()) {
+      whereClause += ' AND date(t.deadline) <= date(?)'
+      params.push(filterEndDate.trim())
     }
 
     if (supervisingOnly === 'true') {

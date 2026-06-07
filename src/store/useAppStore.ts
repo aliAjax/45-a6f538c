@@ -290,6 +290,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (filter.status && filter.status !== 'all') {
           params.set('status', filter.status)
         }
+        if (filter.startDate) {
+          params.set('startDate', filter.startDate)
+        }
+        if (filter.endDate) {
+          params.set('endDate', filter.endDate)
+        }
         if (filter.overdueOnly) {
           params.set('overdueOnly', 'true')
         }

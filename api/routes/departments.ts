@@ -4,7 +4,38 @@ import type { Department, CreateDepartmentRequest, UpdateDepartmentRequest, Depa
 
 const router = Router()
 
-function rowToDepartment(row: any): Department {
+interface DepartmentRow {
+  id: number
+  name: string
+  sort_order: number
+  is_active: number | boolean
+  created_at: string
+  updated_at: string
+}
+
+interface DepartmentTaskStatsRow {
+  department: string
+  total: number
+  pending: number
+  in_progress: number
+  completed: number
+  overdue: number
+}
+
+interface DepartmentRiskStatsRow {
+  department: string
+  total: number
+  completed: number
+  overdue_count: number
+  total_overdue_days: number | null
+  max_overdue_days: number | null
+  avg_overdue_days: number | null
+  due_soon_count: number
+  supervising_count: number
+  long_no_update_count: number
+}
+
+function rowToDepartment(row: DepartmentRow): Department {
   return {
     id: row.id,
     name: row.name,
@@ -21,7 +52,7 @@ router.get('/', (_req: Request, res: Response) => {
       SELECT *
       FROM departments
       ORDER BY sort_order ASC, id ASC
-    `).all() as any[]
+    `).all() as DepartmentRow[]
 
     const departments = rows.map(rowToDepartment)
 
@@ -39,7 +70,7 @@ router.get('/active', (_req: Request, res: Response) => {
       FROM departments
       WHERE is_active = 1
       ORDER BY sort_order ASC, id ASC
-    `).all() as any[]
+    `).all() as DepartmentRow[]
 
     const departments = rows.map(rowToDepartment)
 
@@ -56,7 +87,7 @@ router.get('/:id', (req: Request, res: Response) => {
 
     const row = db.prepare(`
       SELECT * FROM departments WHERE id = ?
-    `).get(id) as any
+    `).get(id) as DepartmentRow | undefined
 
     if (!row) {
       res.status(404).json({ success: false, error: '科室不存在' })
@@ -95,7 +126,7 @@ router.post('/', (req: Request, res: Response) => {
       VALUES (?, ?, 1)
     `).run(name.trim(), finalSortOrder)
 
-    const row = db.prepare('SELECT * FROM departments WHERE id = ?').get(result.lastInsertRowid) as any
+    const row = db.prepare('SELECT * FROM departments WHERE id = ?').get(result.lastInsertRowid) as DepartmentRow
     const department = rowToDepartment(row)
 
     res.json({ success: true, data: department })
@@ -129,7 +160,7 @@ router.put('/:id', (req: Request, res: Response) => {
       }
     }
 
-    const current = db.prepare('SELECT * FROM departments WHERE id = ?').get(id) as any
+    const current = db.prepare('SELECT * FROM departments WHERE id = ?').get(id) as DepartmentRow
 
     const finalName = name !== undefined ? name.trim() : current.name
     const finalSortOrder = sortOrder !== undefined ? sortOrder : current.sort_order
@@ -141,7 +172,7 @@ router.put('/:id', (req: Request, res: Response) => {
       WHERE id = ?
     `).run(finalName, finalSortOrder, finalIsActive, id)
 
-    const row = db.prepare('SELECT * FROM departments WHERE id = ?').get(id) as any
+    const row = db.prepare('SELECT * FROM departments WHERE id = ?').get(id) as DepartmentRow
     const department = rowToDepartment(row)
 
     res.json({ success: true, data: department })
@@ -155,7 +186,7 @@ router.patch('/:id/toggle', (req: Request, res: Response) => {
   try {
     const id = Number(req.params.id)
 
-    const existing = db.prepare('SELECT id, is_active FROM departments WHERE id = ?').get(id) as any
+    const existing = db.prepare('SELECT id, is_active FROM departments WHERE id = ?').get(id) as Pick<DepartmentRow, 'id' | 'is_active'> | undefined
     if (!existing) {
       res.status(404).json({ success: false, error: '科室不存在' })
       return
@@ -169,7 +200,7 @@ router.patch('/:id/toggle', (req: Request, res: Response) => {
       WHERE id = ?
     `).run(newIsActive, id)
 
-    const row = db.prepare('SELECT * FROM departments WHERE id = ?').get(id) as any
+    const row = db.prepare('SELECT * FROM departments WHERE id = ?').get(id) as DepartmentRow
     const department = rowToDepartment(row)
 
     res.json({ success: true, data: department })
@@ -223,7 +254,7 @@ router.get('/stats/tasks', (_req: Request, res: Response) => {
       ORDER BY
         (SELECT COALESCE(sort_order, 9999) FROM departments d WHERE d.name = t.department) ASC,
         t.department ASC
-    `).all(today) as any[]
+    `).all(today) as DepartmentTaskStatsRow[]
 
     const stats: DepartmentStats[] = rows.map((row) => ({
       department: row.department,
@@ -347,7 +378,7 @@ router.get('/stats/risk', (_req: Request, res: Response) => {
       ORDER BY
         (SELECT COALESCE(sort_order, 9999) FROM departments d WHERE d.name = t.department) ASC,
         t.department ASC
-    `).all(today, today, today, today, today, today, today, dueSoonStart, dueSoonEnd, longNoUpdateDate) as any[]
+    `).all(today, today, today, today, today, today, today, dueSoonStart, dueSoonEnd, longNoUpdateDate) as DepartmentRiskStatsRow[]
 
     const deptMap = new Map<string, boolean>()
     const deptRows = db.prepare('SELECT name, is_active FROM departments').all() as { name: string; is_active: number }[]
