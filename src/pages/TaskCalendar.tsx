@@ -46,7 +46,6 @@ export default function TaskCalendar() {
   const [batchLoading, setBatchLoading] = useState(false)
   const [batchResults, setBatchResults] = useState<BatchUpdateTaskResult[] | null>(null)
   const [batchError, setBatchError] = useState<string | null>(null)
-  const [blockedTasks, setBlockedTasks] = useState<Array<{ id: number; content: string; uncompletedPrereqCount: number }> | null>(null)
 
   useEffect(() => {
     fetchDepartments()
@@ -127,7 +126,6 @@ export default function TaskCalendar() {
     if (selectedTaskIds.size === 0) return
     setBatchResults(null)
     setBatchError(null)
-    setBlockedTasks(null)
     setShowBatchModal(true)
   }
 
@@ -135,7 +133,6 @@ export default function TaskCalendar() {
     setBatchLoading(true)
     setBatchResults(null)
     setBatchError(null)
-    setBlockedTasks(null)
 
     try {
       const updates = Array.from(selectedTaskIds).map((id) => ({
@@ -158,10 +155,6 @@ export default function TaskCalendar() {
       console.error('Batch update failed:', err)
       const error = err as ApiError
       setBatchError(error.message || '批量更新失败，请稍后重试')
-
-      if (error.responseData?.blockedTasks) {
-        setBlockedTasks(error.responseData.blockedTasks as Array<{ id: number; content: string; uncompletedPrereqCount: number }>)
-      }
     } finally {
       setBatchLoading(false)
     }
@@ -170,7 +163,6 @@ export default function TaskCalendar() {
   const handleCloseBatchModal = () => {
     if (batchLoading) return
     setShowBatchModal(false)
-    setBlockedTasks(null)
     if (batchResults) {
       fetchCalendarTasks(currentYear, currentMonth, selectedDepartment)
       setBatchResults(null)
@@ -662,7 +654,6 @@ export default function TaskCalendar() {
         loading={batchLoading}
         results={batchResults}
         error={batchError}
-        blockedTasks={blockedTasks}
         onRetry={handleBatchUpdate}
       />
     </div>

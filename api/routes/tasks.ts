@@ -655,47 +655,30 @@ router.patch('/batch/update', (req: Request, res: Response) => {
       return false
     }
 
-    const toComplete: number[] = []
-    updates.forEach(update => {
-      if (update.status === 'completed') {
-        toComplete.push(update.id)
-      }
-    })
-
-    const blockedTasks: number[] = []
-    if (toComplete.length > 0) {
-      const completingSet = new Set<number>(toComplete)
-      toComplete.forEach(taskId => {
-        if (isTaskBlocked(taskId, completingSet)) {
-          blockedTasks.push(taskId)
-        }
-      })
-    }
-
-    if (blockedTasks.length > 0) {
-      const blockedDetails = blockedTasks.map(taskId => {
-        const task = taskRows.get(taskId)
-        const prereqs = allPrereqMap.get(taskId) || []
-        const uncompletedPrereqs = prereqs.filter(prereqId => {
-          const prereqTask = taskRows.get(prereqId)
-          const prereqUpdate = updateMap.get(prereqId)
-          return prereqTask?.status !== 'completed' && prereqUpdate?.status !== 'completed'
-        })
-        return {
-          id: taskId,
-          content: task?.content || '',
-          uncompletedPrereqCount: uncompletedPrereqs.length,
-        }
-      })
-
-      return res.status(400).json({
-        success: false,
-        error: `有 ${blockedTasks.length} 个事项因前置事项未完成而无法标记为已完成`,
-        blockedTasks: blockedDetails,
-      })
-    }
-
     const processed = new Set<number>()
+    const successIds = new Set<number>()
+
+    function isTaskBlockedForCompletion(taskId: number): { blocked: boolean; uncompletedCount: number } {
+      const prereqs = allPrereqMap.get(taskId) || []
+      let uncompletedCount = 0
+
+      for (const prereqId of prereqs) {
+        const prereqRow = taskRows.get(prereqId)
+        const prereqUpdate = updateMap.get(prereqId)
+
+        const isAlreadyCompleted = prereqRow?.status === 'completed'
+        const willBeCompletedInBatch = successIds.has(prereqId)
+
+        if (!isAlreadyCompleted && !willBeCompletedInBatch) {
+          uncompletedCount++
+        }
+      }
+
+      return {
+        blocked: uncompletedCount > 0,
+        uncompletedCount,
+      }
+    }
 
     function processUpdate(update: BatchUpdateTaskItem) {
       if (processed.has(update.id)) return
@@ -706,6 +689,20 @@ router.patch('/batch/update', (req: Request, res: Response) => {
         failCount++
         processed.add(update.id)
         return
+      }
+
+      if (update.status === 'completed') {
+        const { blocked, uncompletedCount } = isTaskBlockedForCompletion(update.id)
+        if (blocked) {
+          results.push({
+            id: update.id,
+            success: false,
+            error: `无法标记为完成，还有 ${uncompletedCount} 个前置事项未完成`,
+          })
+          failCount++
+          processed.add(update.id)
+          return
+        }
       }
 
       const fields: string[] = []
@@ -787,6 +784,7 @@ router.patch('/batch/update', (req: Request, res: Response) => {
 
         results.push({ id: update.id, success: true, task })
         successCount++
+        successIds.add(update.id)
       } catch (err) {
         console.error(`Batch update task ${update.id} error:`, err)
         results.push({ id: update.id, success: false, error: '更新失败' })

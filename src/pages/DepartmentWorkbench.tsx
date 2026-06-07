@@ -7,9 +7,6 @@ import {
   Clock,
   CheckCircle,
   Edit3,
-  X,
-  AlertCircle,
-  Check,
   ListTodo,
   RefreshCw,
   ShieldAlert,
@@ -20,6 +17,7 @@ import {
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import StatusBadge from '../components/StatusBadge'
+import BatchUpdateModal, { type BatchUpdateFormData } from '../components/BatchUpdateModal'
 import type { Task, BatchUpdateTaskResult, RiskLevel, DepartmentRiskDetail } from '../../shared/types'
 import { cn } from '../lib/utils'
 import { useSearchParams, useNavigate } from 'react-router-dom'
@@ -93,13 +91,9 @@ export default function DepartmentWorkbench() {
   const [showDeptDropdown, setShowDeptDropdown] = useState(false)
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<number>>(new Set())
   const [showBatchModal, setShowBatchModal] = useState(false)
-  const [batchStatus, setBatchStatus] = useState<Task['status']>('in_progress')
-  const [batchProgress, setBatchProgress] = useState('')
-  const [showConfirmStep, setShowConfirmStep] = useState(false)
   const [batchLoading, setBatchLoading] = useState(false)
   const [batchResults, setBatchResults] = useState<BatchUpdateTaskResult[] | null>(null)
   const [batchError, setBatchError] = useState<string | null>(null)
-  const [blockedTasks, setBlockedTasks] = useState<Array<{ id: number; content: string; uncompletedPrereqCount: number }> | null>(null)
   const [activeQueue, setActiveQueue] = useState<QueueType>(
     urlTab === 'risk' ? 'risk' : urlTab === 'overdue' ? 'overdue' : urlTab === 'dueThisWeek' ? 'dueThisWeek' : urlTab === 'completed' ? 'completed' : 'pending'
   )
@@ -213,33 +207,20 @@ export default function DepartmentWorkbench() {
 
   const openBatchModal = () => {
     if (selectedTaskIds.size === 0) return
-    setBatchStatus('in_progress')
-    setBatchProgress('')
-    setShowConfirmStep(false)
     setBatchResults(null)
     setBatchError(null)
     setShowBatchModal(true)
   }
 
-  const handleNextStep = () => {
-    setShowConfirmStep(true)
-  }
-
-  const handleBackStep = () => {
-    setShowConfirmStep(false)
-  }
-
-  const handleBatchUpdate = async () => {
+  const handleBatchUpdate = async (data: BatchUpdateFormData) => {
     setBatchLoading(true)
     setBatchResults(null)
     setBatchError(null)
-    setBlockedTasks(null)
 
     try {
       const updates = Array.from(selectedTaskIds).map((id) => ({
         id,
-        status: batchStatus,
-        progress: batchProgress,
+        ...data,
       }))
 
       const result = await batchUpdateTasks({ updates })
@@ -251,6 +232,7 @@ export default function DepartmentWorkbench() {
           setSelectedTaskIds(new Set())
           if (selectedDepartment) {
             fetchDepartmentWorkbench(selectedDepartment)
+            fetchDepartmentRiskDetail(selectedDepartment)
           }
         }, 1500)
       }
@@ -258,10 +240,6 @@ export default function DepartmentWorkbench() {
       console.error('Batch update failed:', err)
       const error = err as ApiError
       setBatchError(error.message || '批量更新失败，请稍后重试')
-
-      if (error.responseData?.blockedTasks) {
-        setBlockedTasks(error.responseData.blockedTasks as Array<{ id: number; content: string; uncompletedPrereqCount: number }>)
-      }
     } finally {
       setBatchLoading(false)
     }
@@ -270,11 +248,10 @@ export default function DepartmentWorkbench() {
   const handleCloseBatchModal = () => {
     if (batchLoading) return
     setShowBatchModal(false)
-    setShowConfirmStep(false)
-    setBlockedTasks(null)
     if (batchResults) {
       if (selectedDepartment) {
         fetchDepartmentWorkbench(selectedDepartment)
+        fetchDepartmentRiskDetail(selectedDepartment)
       }
       setBatchResults(null)
     }
@@ -512,26 +489,17 @@ export default function DepartmentWorkbench() {
         </div>
       )}
 
-      {showBatchModal && (
-        <BatchUpdateModal
-          isOpen={showBatchModal}
-          onClose={handleCloseBatchModal}
-          selectedCount={selectedCount}
-          batchStatus={batchStatus}
-          setBatchStatus={setBatchStatus}
-          batchProgress={batchProgress}
-          setBatchProgress={setBatchProgress}
-          showConfirmStep={showConfirmStep}
-          onNextStep={handleNextStep}
-          onBackStep={handleBackStep}
-          onSubmit={handleBatchUpdate}
-          onRetry={handleBatchUpdate}
-          loading={batchLoading}
-          results={batchResults}
-          error={batchError}
-          blockedTasks={blockedTasks}
-        />
-      )}
+      <BatchUpdateModal
+        isOpen={showBatchModal}
+        onClose={handleCloseBatchModal}
+        selectedCount={selectedCount}
+        departments={departments}
+        onSubmit={handleBatchUpdate}
+        loading={batchLoading}
+        results={batchResults}
+        error={batchError}
+        onRetry={handleBatchUpdate}
+      />
     </div>
   )
 }
@@ -956,428 +924,6 @@ function WorkbenchTaskItem({
             </p>
           )}
         </div>
-      </div>
-    </div>
-  )
-}
-
-function BatchUpdateModal({
-  isOpen,
-  onClose,
-  selectedCount,
-  batchStatus,
-  setBatchStatus,
-  batchProgress,
-  setBatchProgress,
-  showConfirmStep,
-  onNextStep,
-  onBackStep,
-  onSubmit,
-  onRetry,
-  loading,
-  results,
-  error,
-  blockedTasks,
-}: {
-  isOpen: boolean
-  onClose: () => void
-  selectedCount: number
-  batchStatus: Task['status']
-  setBatchStatus: (s: Task['status']) => void
-  batchProgress: string
-  setBatchProgress: (s: string) => void
-  showConfirmStep: boolean
-  onNextStep: () => void
-  onBackStep: () => void
-  onSubmit: () => void
-  onRetry: () => void
-  loading: boolean
-  results: BatchUpdateTaskResult[] | null
-  error: string | null
-  blockedTasks: Array<{ id: number; content: string; uncompletedPrereqCount: number }> | null
-}) {
-  if (!isOpen) return null
-
-  const successCount = results?.filter((r) => r.success).length ?? 0
-  const failCount = results?.filter((r) => !r.success).length ?? 0
-  const hasResults = results !== null
-  const allSuccess = hasResults && failCount === 0
-  const hasFailures = hasResults && failCount > 0
-  const hasBlockedError = blockedTasks !== null && blockedTasks.length > 0
-  const hasGlobalError = error !== null && !hasResults && !hasBlockedError
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div
-        className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
-        onClick={onClose}
-      />
-
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden animate-in fade-in zoom-in duration-200">
-        <div className="flex items-center justify-between p-5 border-b border-slate-100">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-800">批量更新事项</h2>
-            <p className="text-sm text-slate-500 mt-0.5">
-              已选择 {selectedCount} 条事项
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            disabled={loading}
-            className="p-2 rounded-lg hover:bg-slate-100 transition-colors text-slate-500 hover:text-slate-700 disabled:opacity-50"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {hasBlockedError ? (
-          <div className="p-5">
-            <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl mb-5">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-                  <Lock className="w-5 h-5 text-amber-600" />
-                </div>
-                <div>
-                  <p className="font-medium text-amber-800 mb-1">存在阻塞事项</p>
-                  <p className="text-sm text-amber-600">{error}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="mb-5">
-              <p className="text-sm font-medium text-slate-700 mb-2">被阻塞的事项：</p>
-              <div className="max-h-60 overflow-y-auto space-y-2">
-                {blockedTasks.map((task) => (
-                  <div
-                    key={task.id}
-                    className="p-3 bg-slate-50 border border-slate-200 rounded-lg"
-                  >
-                    <div className="flex items-start gap-2">
-                      <Lock className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-slate-700 line-clamp-2">{task.content}</p>
-                        <p className="text-xs text-slate-400 mt-1">
-                          #{task.id} · {task.uncompletedPrereqCount} 个前置事项未完成
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-600 mb-5">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-slate-400" />
-                <span>
-                  请先完成这些事项的前置依赖，然后再尝试标记为已完成。您也可以先更新其他状态。
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={onBackStep}
-                disabled={loading}
-                className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors disabled:opacity-50"
-              >
-                返回修改
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-5 py-2.5 text-sm font-medium text-white bg-primary-600 rounded-xl hover:bg-primary-700 transition-colors"
-              >
-                我知道了
-              </button>
-            </div>
-          </div>
-        ) : hasGlobalError ? (
-          <div className="p-5">
-            <div className="p-4 bg-red-50 border border-red-200 rounded-xl mb-5">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
-                  <AlertCircle className="w-5 h-5 text-red-600" />
-                </div>
-                <div>
-                  <p className="font-medium text-red-800 mb-1">批量更新失败</p>
-                  <p className="text-sm text-red-600">{error}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-600 mb-5">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-slate-400" />
-                <span>
-                  本次操作未能完成，所有事项均未更新。您可以检查网络连接后重试，或关闭对话框稍后再试。
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors"
-              >
-                关闭
-              </button>
-              <button
-                type="button"
-                onClick={onRetry}
-                disabled={loading}
-                className="px-5 py-2.5 text-sm font-medium text-white bg-primary-600 rounded-xl hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {loading ? '重试中...' : '重试'}
-              </button>
-            </div>
-          </div>
-        ) : hasResults ? (
-          <div className="p-5">
-            <div
-              className={cn(
-                'p-4 rounded-xl mb-5',
-                allSuccess
-                  ? 'bg-green-50 border border-green-200'
-                  : 'bg-amber-50 border border-amber-200'
-              )}
-            >
-              <div className="flex items-center gap-3">
-                <div
-                  className={cn(
-                    'w-10 h-10 rounded-full flex items-center justify-center',
-                    allSuccess ? 'bg-green-100' : 'bg-amber-100'
-                  )}
-                >
-                  {allSuccess ? (
-                    <Check className="w-5 h-5 text-green-600" />
-                  ) : (
-                    <AlertCircle className="w-5 h-5 text-amber-600" />
-                  )}
-                </div>
-                <div>
-                  <p
-                    className={cn(
-                      'font-medium',
-                      allSuccess ? 'text-green-800' : 'text-amber-800'
-                    )}
-                  >
-                    {allSuccess ? '全部更新成功' : '部分更新失败'}
-                  </p>
-                  <p
-                    className={cn(
-                      'text-sm',
-                      allSuccess ? 'text-green-600' : 'text-amber-600'
-                    )}
-                  >
-                    成功 {successCount} 条，失败 {failCount} 条
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {hasFailures && (
-              <div className="mb-5 max-h-60 overflow-y-auto space-y-2">
-                <p className="text-sm font-medium text-slate-700 mb-2">失败详情：</p>
-                {results
-                  .filter((r) => !r.success)
-                  .map((r) => (
-                    <div
-                      key={r.id}
-                      className="p-3 bg-red-50 border border-red-100 rounded-lg text-sm"
-                    >
-                      <span className="font-medium text-red-700">事项 #{r.id}：</span>
-                      <span className="text-red-600">{r.error}</span>
-                    </div>
-                  ))}
-              </div>
-            )}
-
-            <div className="flex items-center justify-end gap-3">
-              <button
-                onClick={onClose}
-                className="px-5 py-2.5 text-sm font-medium text-white bg-primary-600 rounded-xl hover:bg-primary-700 transition-colors"
-              >
-                {allSuccess ? '完成' : '我知道了'}
-              </button>
-            </div>
-          </div>
-        ) : showConfirmStep ? (
-          <div className="p-5">
-            <div className="p-4 bg-slate-50 rounded-xl mb-5">
-              <p className="text-sm font-medium text-slate-700 mb-3">请确认以下更新信息：</p>
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-500 w-20">更新数量：</span>
-                  <span className="font-medium text-slate-800">{selectedCount} 条</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-500 w-20">目标状态：</span>
-                  <StatusBadge status={batchStatus} size="sm" />
-                </div>
-                <div className="flex items-start gap-2">
-                  <span className="text-slate-500 w-20 pt-0.5">进展说明：</span>
-                  <span className="font-medium text-slate-800 flex-1">
-                    {batchProgress || <span className="text-slate-400">（无）</span>}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700 mb-5">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                <span>
-                  此操作将批量更新选中的事项，请确认后提交。系统将逐条处理并返回每条的更新结果。
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={onBackStep}
-                disabled={loading}
-                className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors disabled:opacity-50"
-              >
-                上一步
-              </button>
-              <button
-                type="button"
-                onClick={onSubmit}
-                disabled={loading}
-                className="px-5 py-2.5 text-sm font-medium text-white bg-primary-600 rounded-xl hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {loading ? '更新中...' : '确认提交'}
-              </button>
-            </div>
-          </div>
-        ) : (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault()
-              onNextStep()
-            }}
-            className="p-5"
-          >
-            <div className="mb-5">
-              <label className="text-sm font-medium text-slate-700 mb-2 block">
-                更新为状态
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setBatchStatus('pending')}
-                  className={cn(
-                    'flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all',
-                    batchStatus === 'pending'
-                      ? 'border-amber-500 bg-amber-50'
-                      : 'border-slate-200 hover:border-slate-300'
-                  )}
-                >
-                  <AlertCircle
-                    className={cn(
-                      'w-6 h-6',
-                      batchStatus === 'pending' ? 'text-amber-600' : 'text-slate-400'
-                    )}
-                  />
-                  <span
-                    className={cn(
-                      'text-xs font-medium',
-                      batchStatus === 'pending' ? 'text-amber-700' : 'text-slate-600'
-                    )}
-                  >
-                    待办理
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setBatchStatus('in_progress')}
-                  className={cn(
-                    'flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all',
-                    batchStatus === 'in_progress'
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-slate-200 hover:border-slate-300'
-                  )}
-                >
-                  <Clock
-                    className={cn(
-                      'w-6 h-6',
-                      batchStatus === 'in_progress' ? 'text-blue-600' : 'text-slate-400'
-                    )}
-                  />
-                  <span
-                    className={cn(
-                      'text-xs font-medium',
-                      batchStatus === 'in_progress' ? 'text-blue-700' : 'text-slate-600'
-                    )}
-                  >
-                    进行中
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setBatchStatus('completed')}
-                  className={cn(
-                    'flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all',
-                    batchStatus === 'completed'
-                      ? 'border-green-500 bg-green-50'
-                      : 'border-slate-200 hover:border-slate-300'
-                  )}
-                >
-                  <CheckCircle
-                    className={cn(
-                      'w-6 h-6',
-                      batchStatus === 'completed' ? 'text-green-600' : 'text-slate-400'
-                    )}
-                  />
-                  <span
-                    className={cn(
-                      'text-xs font-medium',
-                      batchStatus === 'completed' ? 'text-green-700' : 'text-slate-600'
-                    )}
-                  >
-                    已完成
-                  </span>
-                </button>
-              </div>
-            </div>
-
-            <div className="mb-5">
-              <label className="text-sm font-medium text-slate-700 mb-2 block">
-                进展说明
-                <span className="text-slate-400 font-normal ml-1">（选填）</span>
-              </label>
-              <textarea
-                value={batchProgress}
-                onChange={(e) => setBatchProgress(e.target.value)}
-                placeholder="请输入进展说明，将应用到所有选中的事项..."
-                className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none transition-all"
-                rows={4}
-              />
-            </div>
-
-            <div className="flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors"
-              >
-                取消
-              </button>
-              <button
-                type="submit"
-                className="px-5 py-2.5 text-sm font-medium text-white bg-primary-600 rounded-xl hover:bg-primary-700 transition-colors"
-              >
-                下一步
-              </button>
-            </div>
-          </form>
-        )}
       </div>
     </div>
   )
