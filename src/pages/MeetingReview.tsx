@@ -10,7 +10,6 @@ import {
   AlertTriangle,
   TrendingDown,
   CheckCircle2,
-  Clock,
   BarChart3,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
@@ -53,10 +52,6 @@ export default function MeetingReview() {
     },
     { total: 0, completed: 0, overdue: 0 }
   )
-
-  const overallCompletionRate = overallStats.total > 0
-    ? Math.round((overallStats.completed / overallStats.total) * 100)
-    : 0
 
   return (
     <div className="space-y-6">

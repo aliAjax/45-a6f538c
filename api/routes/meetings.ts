@@ -157,6 +157,12 @@ router.post('/', (req: Request, res: Response) => {
   }
 })
 
+function addDays(dateStr: string, days: number): string {
+  const date = new Date(dateStr)
+  date.setDate(date.getDate() + days)
+  return date.toISOString().split('T')[0]
+}
+
 router.get('/review/stats', (req: Request, res: Response) => {
   try {
     const { startDate, endDate, search, page = '1', pageSize = '10' } = req.query
@@ -171,8 +177,8 @@ router.get('/review/stats', (req: Request, res: Response) => {
       params.push(String(startDate))
     }
     if (endDate) {
-      whereConditions.push('m.meeting_date <= ?')
-      params.push(String(endDate))
+      whereConditions.push('m.meeting_date < ?')
+      params.push(addDays(String(endDate), 1))
     }
     if (search) {
       whereConditions.push('m.title LIKE ?')
