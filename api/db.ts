@@ -346,6 +346,7 @@ function initDatabase() {
   migrateTemplateVersions()
   migrateTaskViewsTargetPage()
   migrateAuditLogsFromProgress()
+  fixAuditLogNullCreatedAt()
 }
 
 function migrateTaskViewsTargetPage() {
@@ -576,12 +577,11 @@ export function createAuditLog(params: {
   department?: string | null
   createdAt?: string | null
 }) {
-  const stmt = db.prepare(`
-    INSERT INTO audit_logs (
-      entity_type, entity_id, action_type, field_name,
-      old_value, new_value, source_page, task_id, meeting_id, department, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `)
+  const fields: string[] = [
+    'entity_type', 'entity_id', 'action_type', 'field_name',
+    'old_value', 'new_value', 'source_page', 'task_id', 'meeting_id', 'department'
+  ]
+  const values: unknown[] = []
 
   const oldVal = params.oldValue !== undefined && params.oldValue !== null
     ? (typeof params.oldValue === 'string' ? params.oldValue : JSON.stringify(params.oldValue))
@@ -590,7 +590,7 @@ export function createAuditLog(params: {
     ? (typeof params.newValue === 'string' ? params.newValue : JSON.stringify(params.newValue))
     : null
 
-  const result = stmt.run(
+  values.push(
     params.entityType,
     params.entityId,
     params.actionType,
@@ -601,10 +601,39 @@ export function createAuditLog(params: {
     params.taskId || null,
     params.meetingId || null,
     params.department || null,
-    params.createdAt || null
   )
 
+  if (params.createdAt) {
+    fields.push('created_at')
+    values.push(params.createdAt)
+  }
+
+  const placeholders = values.map(() => '?').join(', ')
+  const stmt = db.prepare(`
+    INSERT INTO audit_logs (${fields.join(', ')})
+    VALUES (${placeholders})
+  `)
+
+  const result = stmt.run(...values)
+
   return Number(result.lastInsertRowid)
+}
+
+function fixAuditLogNullCreatedAt() {
+  const nullCountRow = db.prepare(`
+    SELECT COUNT(*) as count FROM audit_logs 
+    WHERE created_at IS NULL OR created_at = ''
+  `).get() as { count: number }
+
+  if (nullCountRow.count > 0) {
+    console.log(`[DB] 发现 ${nullCountRow.count} 条 audit_logs 记录 created_at 为空，正在修复...`)
+    const result = db.prepare(`
+      UPDATE audit_logs 
+      SET created_at = datetime('now', 'localtime')
+      WHERE created_at IS NULL OR created_at = ''
+    `).run()
+    console.log(`[DB] 已修复 ${result.changes} 条记录`)
+  }
 }
 
 initDatabase()
