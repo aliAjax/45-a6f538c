@@ -59,9 +59,11 @@ export default function TaskList() {
 
   const urlDepartment = searchParams.get('department') || 'all'
   const urlStatus = searchParams.get('status') || 'all'
+  const urlRisk = searchParams.get('risk') || ''
 
   const [selectedDepartment, setSelectedDepartment] = useState(urlDepartment)
   const [selectedStatus, setSelectedStatus] = useState(urlStatus)
+  const [selectedRisk, setSelectedRisk] = useState(urlRisk)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [showDeptDropdown, setShowDeptDropdown] = useState(false)
@@ -79,11 +81,14 @@ export default function TaskList() {
     if (urlStatus !== selectedStatus) {
       setSelectedStatus(urlStatus)
     }
-  }, [urlDepartment, urlStatus])
+    if (urlRisk !== selectedRisk) {
+      setSelectedRisk(urlRisk)
+    }
+  }, [urlDepartment, urlStatus, urlRisk])
 
   useEffect(() => {
-    fetchTasks(selectedDepartment, selectedStatus, 1, 50)
-  }, [fetchTasks, selectedDepartment, selectedStatus])
+    fetchTasks(selectedDepartment, selectedStatus, 1, 50, selectedRisk)
+  }, [fetchTasks, selectedDepartment, selectedStatus, selectedRisk])
 
   const handleDepartmentChange = (dept: string) => {
     setSelectedDepartment(dept)
@@ -105,6 +110,8 @@ export default function TaskList() {
     } else {
       params.set('status', status)
     }
+    params.delete('risk')
+    setSelectedRisk('')
     setSearchParams(params)
   }
 
@@ -114,7 +121,7 @@ export default function TaskList() {
   }
 
   const handleUpdated = () => {
-    fetchTasks(selectedDepartment, selectedStatus, 1, 50)
+    fetchTasks(selectedDepartment, selectedStatus, 1, 50, selectedRisk)
   }
 
   const allDepartments = ['all', ...allTaskDepartments]
@@ -127,6 +134,28 @@ export default function TaskList() {
     { value: 'in_progress', label: '进行中' },
     { value: 'completed', label: '已完成' },
   ]
+
+  const riskFilterLabels: Record<string, string> = {
+    overdue: '逾期事项',
+    dueSoon: '临期事项',
+    supervising: '督办中事项',
+    longNoUpdate: '长期未更新',
+  }
+
+  const clearRiskFilter = () => {
+    const params = new URLSearchParams(searchParams)
+    params.delete('risk')
+    setSelectedRisk('')
+    setSearchParams(params)
+  }
+
+  const goRiskWorkbench = () => {
+    const params = new URLSearchParams({ tab: 'risk' })
+    if (selectedDepartment !== 'all') {
+      params.set('department', selectedDepartment)
+    }
+    navigate(`/workbench?${params.toString()}`)
+  }
 
   return (
     <div className="space-y-6">
@@ -212,7 +241,7 @@ export default function TaskList() {
 
           <div className="ml-auto flex items-center gap-4">
             <button
-              onClick={() => navigate('/workbench?tab=risk')}
+              onClick={goRiskWorkbench}
               className="inline-flex items-center gap-1.5 text-sm font-medium text-rose-600 hover:text-rose-700 transition-colors"
             >
               <ShieldAlert className="w-4 h-4" />
@@ -224,6 +253,18 @@ export default function TaskList() {
             </div>
           </div>
         </div>
+
+        {selectedRisk && riskFilterLabels[selectedRisk] && (
+          <div className="mt-3 inline-flex items-center gap-2 rounded-lg bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700">
+            <span>风险筛选：{riskFilterLabels[selectedRisk]}</span>
+            <button
+              onClick={clearRiskFilter}
+              className="text-rose-500 hover:text-rose-700"
+            >
+              清除
+            </button>
+          </div>
+        )}
       </div>
 
       {allTaskDepartments.length > 0 && (

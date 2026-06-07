@@ -66,7 +66,7 @@ interface AppState {
   fetchMeetings: (page?: number, pageSize?: number, search?: string) => Promise<void>
   fetchMeetingDetail: (id: number) => Promise<Meeting | null>
   createMeeting: (data: CreateMeetingRequest) => Promise<Meeting>
-  fetchTasks: (department?: string, status?: string, page?: number, pageSize?: number) => Promise<void>
+  fetchTasks: (department?: string, status?: string, page?: number, pageSize?: number, risk?: string) => Promise<void>
   fetchOverdueTasks: () => Promise<void>
   fetchThisWeekTasks: () => Promise<void>
   fetchCalendarTasks: (year: number, month: number, department?: string) => Promise<void>
@@ -174,7 +174,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  fetchTasks: async (department = 'all', status = 'all', page = 1, pageSize = 20) => {
+  fetchTasks: async (department = 'all', status = 'all', page = 1, pageSize = 20, risk = '') => {
     set({ loading: true, error: null })
     try {
       const params = new URLSearchParams({
@@ -183,6 +183,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         page: String(page),
         pageSize: String(pageSize),
       })
+      if (risk) {
+        params.set('risk', risk)
+      }
       const result = await api.get<{ list: Task[]; total: number }>(`/tasks?${params}`)
       set({ tasks: result.list, tasksTotal: result.total, loading: false })
     } catch (error) {

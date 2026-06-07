@@ -580,12 +580,11 @@ function RiskView({
       label: '逾期事项',
       value: stats.overdueCount,
       subValue: stats.overdueCount > 0
-        ? `平均${stats.avgOverdueDays}天 / 最长${stats.maxOverdueDays}天`
+        ? `累计${stats.totalOverdueDays}天 / 平均${stats.avgOverdueDays}天 / 最长${stats.maxOverdueDays}天`
         : '',
       icon: AlertTriangle,
       color: 'red',
-      tasks: riskDetail.overdueTasks,
-      navigateTo: `/tasks?department=${encodeURIComponent(department)}&status=pending`,
+      navigateTo: `/tasks?department=${encodeURIComponent(department)}&risk=overdue`,
     },
     {
       label: '临期事项',
@@ -593,8 +592,7 @@ function RiskView({
       subValue: '未来3天内',
       icon: Clock3,
       color: 'amber',
-      tasks: riskDetail.dueSoonTasks,
-      navigateTo: `/tasks?department=${encodeURIComponent(department)}&status=pending`,
+      navigateTo: `/tasks?department=${encodeURIComponent(department)}&risk=dueSoon`,
     },
     {
       label: '督办中事项',
@@ -602,8 +600,7 @@ function RiskView({
       subValue: '需重点跟进',
       icon: BellRing,
       color: 'rose',
-      tasks: riskDetail.supervisingTasks,
-      navigateTo: `/tasks?department=${encodeURIComponent(department)}&status=pending`,
+      navigateTo: `/tasks?department=${encodeURIComponent(department)}&risk=supervising`,
     },
     {
       label: '长期未更新',
@@ -611,8 +608,7 @@ function RiskView({
       subValue: '超过15天',
       icon: Activity,
       color: 'violet',
-      tasks: riskDetail.longNoUpdateTasks,
-      navigateTo: `/tasks?department=${encodeURIComponent(department)}&status=pending`,
+      navigateTo: `/tasks?department=${encodeURIComponent(department)}&risk=longNoUpdate`,
     },
   ]
 

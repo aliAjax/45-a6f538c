@@ -153,7 +153,10 @@ function getThisWeekRange(): { start: string; end: string } {
 
 router.get('/', (req: Request, res: Response) => {
   try {
-    const { department, status, page = '1', pageSize = '20' } = req.query
+    const { department, status, risk, page = '1', pageSize = '20' } = req.query
+    const today = new Date().toISOString().split('T')[0]
+    const { start: dueSoonStart, end: dueSoonEnd } = getDueSoonRange()
+    const longNoUpdateDate = getLongNoUpdateDate()
 
     let whereClause = 'WHERE 1=1'
     const params: (string | number)[] = []
@@ -163,7 +166,22 @@ router.get('/', (req: Request, res: Response) => {
       params.push(department as string)
     }
 
-    if (status && status !== 'all') {
+    if (risk === 'overdue') {
+      whereClause += ' AND t.status != ? AND t.deadline < ?'
+      params.push('completed', today)
+    } else if (risk === 'dueSoon') {
+      whereClause += ' AND t.status != ? AND t.deadline >= ? AND t.deadline <= ?'
+      params.push('completed', dueSoonStart, dueSoonEnd)
+    } else if (risk === 'supervising') {
+      whereClause += ` AND t.status != ? AND EXISTS (
+        SELECT 1 FROM task_supervisions ts
+        WHERE ts.task_id = t.id AND ts.status = 'active'
+      )`
+      params.push('completed')
+    } else if (risk === 'longNoUpdate') {
+      whereClause += ' AND t.status != ? AND t.updated_at < ?'
+      params.push('completed', longNoUpdateDate)
+    } else if (status && status !== 'all') {
       whereClause += ' AND t.status = ?'
       params.push(status as string)
     }
@@ -673,6 +691,7 @@ function getLongNoUpdateDate(): string {
 
 function calculateRiskLevel(stats: {
   overdueCount: number
+  totalOverdueDays: number
   maxOverdueDays: number
   dueSoonCount: number
   supervisingCount: number
@@ -684,9 +703,9 @@ function calculateRiskLevel(stats: {
   const factors: string[] = []
 
   if (stats.overdueCount > 0) {
-    const overdueScore = Math.min(stats.overdueCount * 10 + stats.maxOverdueDays, 40)
+    const overdueScore = Math.min(stats.overdueCount * 10 + stats.totalOverdueDays, 40)
     score += overdueScore
-    factors.push(`逾期 ${stats.overdueCount} 项，最长逾期 ${stats.maxOverdueDays} 天`)
+    factors.push(`逾期 ${stats.overdueCount} 项，累计逾期 ${stats.totalOverdueDays} 天，最长逾期 ${stats.maxOverdueDays} 天`)
   }
 
   if (stats.supervisingCount > 0) {
@@ -828,17 +847,18 @@ router.get('/risk/:department', (req: Request, res: Response) => {
     const completionRate = total > 0 ? Math.round((completed / total) * 1000) / 10 : 0
     const maxOverdueDays = maxOverdueRow.max_days || 0
 
+    const totalOverdueDays = overdueTasks.reduce((sum, task) => {
+      const days = Math.floor((new Date(today).getTime() - new Date(task.deadline).getTime()) / (1000 * 60 * 60 * 24))
+      return sum + Math.max(0, days)
+    }, 0)
+
     const avgOverdueDays = overdueTasks.length > 0
-      ? Math.round(
-          overdueTasks.reduce((sum, task) => {
-            const days = Math.floor((new Date(today).getTime() - new Date(task.deadline).getTime()) / (1000 * 60 * 60 * 24))
-            return sum + Math.max(0, days)
-          }, 0) / overdueTasks.length * 10
-        ) / 10
+      ? Math.round((totalOverdueDays / overdueTasks.length) * 10) / 10
       : 0
 
     const { level, score, factors } = calculateRiskLevel({
       overdueCount: overdueTasks.length,
+      totalOverdueDays,
       maxOverdueDays,
       dueSoonCount: dueSoonTasks.length,
       supervisingCount: supervisingTasks.length,
@@ -856,6 +876,7 @@ router.get('/risk/:department', (req: Request, res: Response) => {
       completed,
       completionRate,
       overdueCount: overdueTasks.length,
+      totalOverdueDays,
       maxOverdueDays,
       avgOverdueDays,
       dueSoonCount: dueSoonTasks.length,

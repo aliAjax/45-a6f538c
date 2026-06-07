@@ -261,6 +261,7 @@ function getLongNoUpdateDate(): string {
 
 function calculateRiskLevel(stats: {
   overdueCount: number
+  totalOverdueDays: number
   maxOverdueDays: number
   dueSoonCount: number
   supervisingCount: number
@@ -272,9 +273,9 @@ function calculateRiskLevel(stats: {
   const factors: string[] = []
 
   if (stats.overdueCount > 0) {
-    const overdueScore = Math.min(stats.overdueCount * 10 + stats.maxOverdueDays, 40)
+    const overdueScore = Math.min(stats.overdueCount * 10 + stats.totalOverdueDays, 40)
     score += overdueScore
-    factors.push(`逾期 ${stats.overdueCount} 项，最长逾期 ${stats.maxOverdueDays} 天`)
+    factors.push(`逾期 ${stats.overdueCount} 项，累计逾期 ${stats.totalOverdueDays} 天，最长逾期 ${stats.maxOverdueDays} 天`)
   }
 
   if (stats.supervisingCount > 0) {
@@ -326,6 +327,9 @@ router.get('/stats/risk', (_req: Request, res: Response) => {
         COUNT(*) as total,
         SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) as completed,
         SUM(CASE WHEN t.status != 'completed' AND t.deadline < ? THEN 1 ELSE 0 END) as overdue_count,
+        SUM(CASE WHEN t.status != 'completed' AND t.deadline < ?
+            THEN CAST((julianday(?) - julianday(t.deadline)) AS INTEGER)
+            ELSE 0 END) as total_overdue_days,
         MAX(CASE WHEN t.status != 'completed' AND t.deadline < ?
             THEN CAST((julianday(?) - julianday(t.deadline)) AS INTEGER)
             ELSE 0 END) as max_overdue_days,
@@ -343,7 +347,7 @@ router.get('/stats/risk', (_req: Request, res: Response) => {
       ORDER BY
         (SELECT COALESCE(sort_order, 9999) FROM departments d WHERE d.name = t.department) ASC,
         t.department ASC
-    `).all(today, today, today, today, today, dueSoonStart, dueSoonEnd, longNoUpdateDate) as any[]
+    `).all(today, today, today, today, today, today, today, dueSoonStart, dueSoonEnd, longNoUpdateDate) as any[]
 
     const deptMap = new Map<string, boolean>()
     const deptRows = db.prepare('SELECT name, is_active FROM departments').all() as { name: string; is_active: number }[]
@@ -354,6 +358,7 @@ router.get('/stats/risk', (_req: Request, res: Response) => {
       const completed = row.completed
       const completionRate = total > 0 ? Math.round((completed / total) * 1000) / 10 : 0
       const overdueCount = row.overdue_count
+      const totalOverdueDays = row.total_overdue_days || 0
       const maxOverdueDays = row.max_overdue_days || 0
       const avgOverdueDays = row.avg_overdue_days ? Math.round(row.avg_overdue_days * 10) / 10 : 0
       const dueSoonCount = row.due_soon_count
@@ -362,6 +367,7 @@ router.get('/stats/risk', (_req: Request, res: Response) => {
 
       const { level, score, factors } = calculateRiskLevel({
         overdueCount,
+        totalOverdueDays,
         maxOverdueDays,
         dueSoonCount,
         supervisingCount,
@@ -377,6 +383,7 @@ router.get('/stats/risk', (_req: Request, res: Response) => {
         completed,
         completionRate,
         overdueCount,
+        totalOverdueDays,
         maxOverdueDays,
         avgOverdueDays,
         dueSoonCount,
