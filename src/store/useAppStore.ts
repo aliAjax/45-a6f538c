@@ -16,6 +16,9 @@ import type {
   ReminderGroups,
   MeetingReviewStats,
   ParseMeetingResponse,
+  BatchUpdateTaskRequest,
+  BatchUpdateTaskResponse,
+  DepartmentWorkbenchData,
 } from '../../shared/types'
 import api from '../utils/api'
 
@@ -41,6 +44,7 @@ interface AppState {
   reminderGroups: ReminderGroups | null
   meetingReviewList: MeetingReviewStats[]
   meetingReviewTotal: number
+  departmentWorkbench: DepartmentWorkbenchData | null
   loading: boolean
   error: string | null
 
@@ -60,6 +64,8 @@ interface AppState {
   toggleDepartmentStatus: (id: number) => Promise<Department>
   deleteDepartment: (id: number) => Promise<void>
   updateTask: (id: number, data: UpdateTaskRequest) => Promise<Task>
+  batchUpdateTasks: (updates: BatchUpdateTaskRequest) => Promise<BatchUpdateTaskResponse>
+  fetchDepartmentWorkbench: (department: string) => Promise<void>
   fetchTaskProgress: (taskId: number) => Promise<TaskProgress[]>
   fetchTemplates: () => Promise<void>
   fetchTemplateDetail: (id: number) => Promise<MeetingTemplate | null>
@@ -70,7 +76,7 @@ interface AppState {
   parseMeetingText: (text: string) => Promise<ParseMeetingResponse>
 }
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>((set, get) => ({
   stats: null,
   meetings: [],
   meetingsTotal: 0,
@@ -87,6 +93,7 @@ export const useAppStore = create<AppState>((set) => ({
   reminderGroups: null,
   meetingReviewList: [],
   meetingReviewTotal: 0,
+  departmentWorkbench: null,
   loading: false,
   error: null,
 
@@ -298,6 +305,55 @@ export const useAppStore = create<AppState>((set) => ({
     } catch (error) {
       set({ error: getErrorMessage(error), loading: false })
       throw error
+    }
+  },
+
+  batchUpdateTasks: async (updates: BatchUpdateTaskRequest) => {
+    set({ loading: true, error: null })
+    try {
+      const result = await api.patch<BatchUpdateTaskResponse>('/tasks/batch/update', updates)
+      set({ loading: false })
+
+      if (result.successCount > 0) {
+        const {
+          fetchStats,
+          fetchOverdueTasks,
+          fetchThisWeekTasks,
+          fetchDepartmentTaskStats,
+          fetchTasks,
+          fetchDepartmentWorkbench,
+          departmentWorkbench,
+          tasks,
+        } = get()
+
+        fetchStats()
+        fetchOverdueTasks()
+        fetchThisWeekTasks()
+        fetchDepartmentTaskStats()
+
+        if (tasks.length > 0) {
+          fetchTasks('all', 'all', 1, 50)
+        }
+
+        if (departmentWorkbench) {
+          fetchDepartmentWorkbench(departmentWorkbench.department)
+        }
+      }
+
+      return result
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  fetchDepartmentWorkbench: async (department: string) => {
+    set({ loading: true, error: null })
+    try {
+      const data = await api.get<DepartmentWorkbenchData>(`/tasks/workbench/${encodeURIComponent(department)}`)
+      set({ departmentWorkbench: data, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
     }
   },
 

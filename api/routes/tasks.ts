@@ -1,6 +1,15 @@
 import { Router, type Request, type Response } from 'express'
 import db from '../db.js'
-import type { Task, TaskProgress, UpdateTaskRequest, CalendarDayTasks } from '../../shared/types.js'
+import type {
+  Task,
+  TaskProgress,
+  UpdateTaskRequest,
+  CalendarDayTasks,
+  BatchUpdateTaskRequest,
+  BatchUpdateTaskResponse,
+  BatchUpdateTaskResult,
+  DepartmentWorkbenchData,
+} from '../../shared/types.js'
 
 interface TaskRowWithTitle {
   id: number
@@ -317,6 +326,193 @@ router.get('/:id/progress', (req: Request, res: Response) => {
   } catch (error) {
     console.error('Get task progress error:', error)
     res.status(500).json({ success: false, error: '获取进展记录失败' })
+  }
+})
+
+router.patch('/batch/update', (req: Request, res: Response) => {
+  try {
+    const { updates } = req.body as BatchUpdateTaskRequest
+
+    if (!updates || !Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ success: false, error: '更新列表不能为空' })
+    }
+
+    if (updates.length > 100) {
+      return res.status(400).json({ success: false, error: '单次批量更新不能超过100条' })
+    }
+
+    const results: BatchUpdateTaskResult[] = []
+    let successCount = 0
+    let failCount = 0
+
+    for (const update of updates) {
+      try {
+        const taskRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(update.id) as TaskRowWithTitle | undefined
+
+        if (!taskRow) {
+          results.push({ id: update.id, success: false, error: '事项不存在' })
+          failCount++
+          continue
+        }
+
+        const fields: string[] = []
+        const values: (string | number)[] = []
+
+        if (update.status !== undefined) {
+          fields.push('status = ?')
+          values.push(update.status)
+        }
+
+        if (update.progress !== undefined) {
+          fields.push('progress = ?')
+          values.push(update.progress)
+        }
+
+        if (fields.length === 0) {
+          results.push({ id: update.id, success: false, error: '没有需要更新的字段' })
+          failCount++
+          continue
+        }
+
+        fields.push("updated_at = datetime('now', 'localtime')")
+        values.push(Number(update.id))
+
+        const newStatus = update.status !== undefined ? update.status : taskRow.status
+        const newProgress = update.progress !== undefined ? update.progress : taskRow.progress || ''
+
+        const updateTransaction = db.transaction(() => {
+          const stmt = db.prepare(`
+            UPDATE tasks
+            SET ${fields.join(', ')}
+            WHERE id = ?
+          `)
+          stmt.run(...values)
+
+          const insertProgress = db.prepare(`
+            INSERT INTO task_progress (task_id, status, progress)
+            VALUES (?, ?, ?)
+          `)
+          insertProgress.run(Number(update.id), newStatus, newProgress)
+        })
+
+        updateTransaction()
+
+        const updatedRow = db.prepare(`
+          SELECT t.*, m.title as meeting_title
+          FROM tasks t
+          LEFT JOIN meetings m ON t.meeting_id = m.id
+          WHERE t.id = ?
+        `).get(update.id) as TaskRowWithTitle
+
+        const task = rowToTask(updatedRow)
+
+        results.push({ id: update.id, success: true, task })
+        successCount++
+      } catch (err) {
+        console.error(`Batch update task ${update.id} error:`, err)
+        results.push({ id: update.id, success: false, error: '更新失败' })
+        failCount++
+      }
+    }
+
+    const response: BatchUpdateTaskResponse = {
+      total: updates.length,
+      successCount,
+      failCount,
+      results,
+    }
+
+    res.json({ success: true, data: response })
+  } catch (error) {
+    console.error('Batch update tasks error:', error)
+    res.status(500).json({ success: false, error: '批量更新失败' })
+  }
+})
+
+router.get('/workbench/:department', (req: Request, res: Response) => {
+  try {
+    const { department } = req.params
+    const today = new Date().toISOString().split('T')[0]
+    const { start, end } = getThisWeekRange()
+
+    const pendingRows = db.prepare(`
+      SELECT t.*, m.title as meeting_title
+      FROM tasks t
+      LEFT JOIN meetings m ON t.meeting_id = m.id
+      WHERE t.department = ?
+        AND t.status = 'pending'
+        AND t.deadline >= ?
+      ORDER BY t.deadline ASC, t.id DESC
+    `).all(department, today) as TaskRowWithTitle[]
+
+    const overdueRows = db.prepare(`
+      SELECT t.*, m.title as meeting_title
+      FROM tasks t
+      LEFT JOIN meetings m ON t.meeting_id = m.id
+      WHERE t.department = ?
+        AND t.status != 'completed'
+        AND t.deadline < ?
+      ORDER BY t.deadline ASC, t.id DESC
+    `).all(department, today) as TaskRowWithTitle[]
+
+    const dueThisWeekRows = db.prepare(`
+      SELECT t.*, m.title as meeting_title
+      FROM tasks t
+      LEFT JOIN meetings m ON t.meeting_id = m.id
+      WHERE t.department = ?
+        AND t.status != 'completed'
+        AND t.deadline >= ?
+        AND t.deadline <= ?
+        AND t.deadline >= ?
+      ORDER BY t.deadline ASC, t.id DESC
+    `).all(department, start, end, today) as TaskRowWithTitle[]
+
+    const completedRows = db.prepare(`
+      SELECT t.*, m.title as meeting_title
+      FROM tasks t
+      LEFT JOIN meetings m ON t.meeting_id = m.id
+      WHERE t.department = ?
+        AND t.status = 'completed'
+      ORDER BY t.updated_at DESC, t.id DESC
+      LIMIT 50
+    `).all(department) as TaskRowWithTitle[]
+
+    const pending = pendingRows.map(rowToTask)
+    const overdue = overdueRows.map(rowToTask)
+    const dueThisWeek = dueThisWeekRows.map(rowToTask)
+    const completed = completedRows.map(rowToTask)
+
+    const totalCountRow = db.prepare(`
+      SELECT COUNT(*) as count
+      FROM tasks
+      WHERE department = ?
+    `).get(department) as { count: number }
+
+    const completedCountRow = db.prepare(`
+      SELECT COUNT(*) as count
+      FROM tasks
+      WHERE department = ? AND status = 'completed'
+    `).get(department) as { count: number }
+
+    const workbenchData: DepartmentWorkbenchData = {
+      department,
+      pending,
+      overdue,
+      dueThisWeek,
+      completed,
+      stats: {
+        total: totalCountRow.count,
+        pending: pending.length,
+        overdue: overdue.length,
+        dueThisWeek: dueThisWeek.length,
+        completed: completedCountRow.count,
+      },
+    }
+
+    res.json({ success: true, data: workbenchData })
+  } catch (error) {
+    console.error('Get department workbench error:', error)
+    res.status(500).json({ success: false, error: '获取科室工作台数据失败' })
   }
 })
 

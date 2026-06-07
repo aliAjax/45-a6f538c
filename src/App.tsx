@@ -12,6 +12,7 @@ import TaskList from './pages/TaskList'
 import TaskCalendar from './pages/TaskCalendar'
 import TemplateList from './pages/TemplateList'
 import DepartmentList from './pages/DepartmentList'
+import DepartmentWorkbench from './pages/DepartmentWorkbench'
 
 export default function App() {
   return (
@@ -31,6 +32,7 @@ export default function App() {
                 <Route path="/meetings/:id" element={<MeetingDetail />} />
                 <Route path="/review" element={<MeetingReview />} />
                 <Route path="/tasks" element={<TaskList />} />
+                <Route path="/workbench" element={<DepartmentWorkbench />} />
                 <Route path="/calendar" element={<TaskCalendar />} />
                 <Route path="/templates" element={<TemplateList />} />
                 <Route path="/departments" element={<DepartmentList />} />

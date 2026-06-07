@@ -10,6 +10,7 @@ import {
   Building2,
   Calendar as CalendarIcon,
   BarChart3,
+  Layers,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import ReminderPanel from './ReminderPanel'
@@ -19,6 +20,7 @@ const navItems = [
   { path: '/', label: '首页概览', icon: LayoutDashboard },
   { path: '/meetings', label: '会议纪要', icon: FileText },
   { path: '/tasks', label: '待办事项', icon: CheckSquare },
+  { path: '/workbench', label: '科室工作台', icon: Layers },
   { path: '/review', label: '会议复盘', icon: BarChart3 },
   { path: '/calendar', label: '任务日历', icon: CalendarIcon },
   { path: '/templates', label: '模板库', icon: LayoutTemplate },

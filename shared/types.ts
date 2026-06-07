@@ -165,3 +165,42 @@ export interface ParseMeetingResponse {
   meetings: ParsedMeeting[]
   warnings: string[]
 }
+
+export interface BatchUpdateTaskItem {
+  id: number
+  status?: 'pending' | 'in_progress' | 'completed'
+  progress?: string
+}
+
+export interface BatchUpdateTaskRequest {
+  updates: BatchUpdateTaskItem[]
+}
+
+export interface BatchUpdateTaskResult {
+  id: number
+  success: boolean
+  task?: Task
+  error?: string
+}
+
+export interface BatchUpdateTaskResponse {
+  total: number
+  successCount: number
+  failCount: number
+  results: BatchUpdateTaskResult[]
+}
+
+export interface DepartmentWorkbenchData {
+  department: string
+  pending: Task[]
+  overdue: Task[]
+  dueThisWeek: Task[]
+  completed: Task[]
+  stats: {
+    total: number
+    pending: number
+    overdue: number
+    dueThisWeek: number
+    completed: number
+  }
+}
