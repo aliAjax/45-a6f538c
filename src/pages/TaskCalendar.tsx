@@ -13,6 +13,7 @@ import {
   Search,
   BellRing,
   AlertTriangle,
+  CheckSquare,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import TaskUpdateModal from '../components/TaskUpdateModal'
@@ -153,6 +154,7 @@ export default function TaskCalendar() {
   const [batchError, setBatchError] = useState<string | null>(null)
   const [showWarning, setShowWarning] = useState(false)
   const [warningMessage, setWarningMessage] = useState('')
+  const [showStatusDropdown, setShowStatusDropdown] = useState(false)
 
   useEffect(() => {
     fetchDepartments()
@@ -224,8 +226,8 @@ export default function TaskCalendar() {
     setCurrentViewId(view.id)
   }
 
-  const handleCreateView = (name: string, viewFilter: TaskFilter) => {
-    return createTaskView({ name, filter: viewFilter })
+  const handleCreateView = (name: string, viewFilter: TaskFilter, targetPage?: 'tasks' | 'calendar') => {
+    return createTaskView({ name, filter: viewFilter, targetPage })
   }
 
   const handleDeleteView = (id: number) => {
@@ -282,6 +284,19 @@ export default function TaskCalendar() {
 
   const handleToggleSupervising = () => {
     updateFilter({ supervisingOnly: !filter.supervisingOnly })
+  }
+
+  const handleStatusChange = (status: string) => {
+    setShowStatusDropdown(false)
+    updateFilter({ status })
+  }
+
+  const handleToggleOverdue = () => {
+    updateFilter({ overdueOnly: !filter.overdueOnly })
+  }
+
+  const handleToggleDueSoon = () => {
+    updateFilter({ dueSoonOnly: !filter.dueSoonOnly })
   }
 
   const handleDayClick = (day: CalendarDayTasks) => {
@@ -512,6 +527,7 @@ export default function TaskCalendar() {
               onDeleteView={handleDeleteView}
               currentViewId={currentViewId}
               showSaveButton={true}
+              defaultTargetPage="calendar"
             />
 
             <div className="relative">
@@ -525,18 +541,56 @@ export default function TaskCalendar() {
               />
             </div>
 
-            <button
-              onClick={handleToggleSupervising}
-              className={cn(
-                'inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all',
-                filter.supervisingOnly
-                  ? 'bg-rose-100 text-rose-700'
-                  : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+            <div className="relative">
+              <button
+                onClick={() => setShowStatusDropdown(!showStatusDropdown)}
+                className="inline-flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-xl text-sm hover:bg-slate-50 transition-colors"
+              >
+                <CheckSquare className="w-4 h-4 text-slate-500" />
+                <span className="text-slate-700">
+                  {filter.status === 'all'
+                    ? '全部状态'
+                    : filter.status === 'pending'
+                    ? '待办理'
+                    : filter.status === 'in_progress'
+                    ? '进行中'
+                    : filter.status === 'completed'
+                    ? '已完成'
+                    : '全部状态'}
+                </span>
+                <ChevronDown className={cn('w-4 h-4 text-slate-400 transition-transform', showStatusDropdown && 'rotate-180')} />
+              </button>
+
+              {showStatusDropdown && (
+                <>
+                  <div
+                    className="fixed inset-0 z-10"
+                    onClick={() => setShowStatusDropdown(false)}
+                  />
+                  <div className="absolute top-full right-0 mt-2 w-36 bg-white border border-slate-200 rounded-xl shadow-lg z-20 py-1">
+                    {[
+                      { value: 'all', label: '全部状态' },
+                      { value: 'pending', label: '待办理' },
+                      { value: 'in_progress', label: '进行中' },
+                      { value: 'completed', label: '已完成' },
+                    ].map((item) => (
+                      <button
+                        key={item.value}
+                        onClick={() => handleStatusChange(item.value)}
+                        className={cn(
+                          'w-full px-4 py-2.5 text-left text-sm transition-colors',
+                          filter.status === item.value
+                            ? 'bg-primary-50 text-primary-700 font-medium'
+                            : 'text-slate-700 hover:bg-slate-50'
+                        )}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
               )}
-            >
-              <BellRing className="w-4 h-4" />
-              仅督办
-            </button>
+            </div>
 
             {selectMode ? (
               <div className="flex items-center gap-3">
@@ -623,6 +677,48 @@ export default function TaskCalendar() {
                 </>
               )}
             </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 pt-3 pb-2 border-t border-slate-100 mb-4">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-slate-500">快捷筛选：</span>
+            <button
+              onClick={handleToggleOverdue}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+                filter.overdueOnly
+                  ? 'bg-red-100 text-red-700'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              )}
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              仅逾期
+            </button>
+            <button
+              onClick={handleToggleDueSoon}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+                filter.dueSoonOnly
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              )}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              仅临期
+            </button>
+            <button
+              onClick={handleToggleSupervising}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+                filter.supervisingOnly
+                  ? 'bg-rose-100 text-rose-700'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              )}
+            >
+              <BellRing className="w-3.5 h-3.5" />
+              仅督办
+            </button>
           </div>
         </div>
 

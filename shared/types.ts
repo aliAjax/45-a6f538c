@@ -477,6 +477,7 @@ export interface TaskView {
   id: number
   name: string
   filter: TaskFilter
+  targetPage: 'tasks' | 'calendar'
   sortOrder: number
   createdAt: string
   updatedAt: string
@@ -485,11 +486,13 @@ export interface TaskView {
 export interface CreateTaskViewRequest {
   name: string
   filter: TaskFilter
+  targetPage?: 'tasks' | 'calendar'
 }
 
 export interface UpdateTaskViewRequest {
   name?: string
   filter?: TaskFilter
+  targetPage?: 'tasks' | 'calendar'
   sortOrder?: number
 }
 

@@ -240,8 +240,8 @@ export default function TaskList() {
     setCurrentViewId(view.id)
   }
 
-  const handleCreateView = (name: string, viewFilter: TaskFilter) => {
-    return createTaskView({ name, filter: viewFilter })
+  const handleCreateView = (name: string, viewFilter: TaskFilter, targetPage?: 'tasks' | 'calendar') => {
+    return createTaskView({ name, filter: viewFilter, targetPage })
   }
 
   const handleDeleteView = (id: number) => {
@@ -483,6 +483,8 @@ export default function TaskList() {
             onCreateView={handleCreateView}
             onDeleteView={handleDeleteView}
             currentViewId={currentViewId}
+            showSaveButton={true}
+            defaultTargetPage="tasks"
           />
 
           <div className="relative">

@@ -12,6 +12,7 @@ interface TaskViewRow {
   id: number
   name: string
   filter_json: string
+  target_page: string
   sort_order: number
   created_at: string
   updated_at: string
@@ -40,6 +41,7 @@ function rowToTaskView(row: TaskViewRow): TaskView {
     id: row.id,
     name: row.name,
     filter,
+    targetPage: (row.target_page as 'tasks' | 'calendar') || 'tasks',
     sortOrder: row.sort_order,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -87,7 +89,7 @@ router.get('/:id', (req: Request, res: Response) => {
 
 router.post('/', (req: Request, res: Response) => {
   try {
-    const { name, filter } = req.body as CreateTaskViewRequest
+    const { name, filter, targetPage } = req.body as CreateTaskViewRequest
 
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, error: '视图名称不能为空' })
@@ -100,11 +102,12 @@ router.post('/', (req: Request, res: Response) => {
     const nextSortOrder = (maxSortOrderRow.max_sort || 0) + 1
 
     const filterJson = JSON.stringify(filter || {})
+    const target = targetPage === 'calendar' ? 'calendar' : 'tasks'
 
     const result = db.prepare(`
-      INSERT INTO task_views (name, filter_json, sort_order)
-      VALUES (?, ?, ?)
-    `).run(name.trim(), filterJson, nextSortOrder)
+      INSERT INTO task_views (name, filter_json, target_page, sort_order)
+      VALUES (?, ?, ?, ?)
+    `).run(name.trim(), filterJson, target, nextSortOrder)
 
     const newId = result.lastInsertRowid as number
 
@@ -124,7 +127,7 @@ router.post('/', (req: Request, res: Response) => {
 router.put('/:id', (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const { name, filter, sortOrder } = req.body as UpdateTaskViewRequest
+    const { name, filter, sortOrder, targetPage } = req.body as UpdateTaskViewRequest
 
     const existingRow = db.prepare(`
       SELECT * FROM task_views WHERE id = ?
@@ -148,6 +151,11 @@ router.put('/:id', (req: Request, res: Response) => {
     if (filter !== undefined) {
       fields.push('filter_json = ?')
       values.push(JSON.stringify(filter))
+    }
+
+    if (targetPage !== undefined) {
+      fields.push('target_page = ?')
+      values.push(targetPage === 'calendar' ? 'calendar' : 'tasks')
     }
 
     if (sortOrder !== undefined) {

@@ -8,6 +8,8 @@ import {
   X,
   AlertTriangle,
   Check,
+  Calendar,
+  List,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import type { TaskView, TaskFilter } from '../../shared/types'
@@ -16,10 +18,11 @@ import { cn } from '../lib/utils'
 interface ViewSelectorProps {
   currentFilter: TaskFilter
   onViewSelect: (view: TaskView) => void
-  onCreateView?: (name: string, filter: TaskFilter) => void
+  onCreateView?: (name: string, filter: TaskFilter, targetPage?: 'tasks' | 'calendar') => void
   onDeleteView?: (id: number) => void
   currentViewId: number | null
   showSaveButton?: boolean
+  defaultTargetPage?: 'tasks' | 'calendar'
   className?: string
 }
 
@@ -30,12 +33,14 @@ export default function ViewSelector({
   onDeleteView,
   currentViewId,
   showSaveButton = true,
+  defaultTargetPage = 'tasks',
   className,
 }: ViewSelectorProps) {
   const { taskViews, departments, fetchTaskViews, createTaskView, deleteTaskView, validateTaskView } = useAppStore()
   const [showDropdown, setShowDropdown] = useState(false)
   const [showSaveModal, setShowSaveModal] = useState(false)
   const [viewName, setViewName] = useState('')
+  const [targetPage, setTargetPage] = useState<'tasks' | 'calendar'>(defaultTargetPage)
   const [invalidViewIds, setInvalidViewIds] = useState<Set<number>>(new Set())
   const [saving, setSaving] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -84,12 +89,13 @@ export default function ViewSelector({
     setSaving(true)
     try {
       if (onCreateView) {
-        onCreateView(viewName.trim(), currentFilter)
+        onCreateView(viewName.trim(), currentFilter, targetPage)
       } else {
-        await createTaskView({ name: viewName.trim(), filter: currentFilter })
+        await createTaskView({ name: viewName.trim(), filter: currentFilter, targetPage })
       }
       setShowSaveModal(false)
       setViewName('')
+      setTargetPage(defaultTargetPage)
     } catch (err) {
       console.error('Failed to save view:', err)
     } finally {
@@ -236,7 +242,56 @@ export default function ViewSelector({
                   }
                 }}
               />
-              <p className="mt-2 text-xs text-slate-500">
+
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  目标页面
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setTargetPage('tasks')}
+                    className={cn(
+                      'flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all',
+                      targetPage === 'tasks'
+                        ? 'border-primary-500 bg-primary-50'
+                        : 'border-slate-200 hover:border-slate-300'
+                    )}
+                  >
+                    <List className={cn(
+                      'w-5 h-5',
+                      targetPage === 'tasks' ? 'text-primary-600' : 'text-slate-400'
+                    )} />
+                    <span className={cn(
+                      'text-sm font-medium',
+                      targetPage === 'tasks' ? 'text-primary-700' : 'text-slate-600'
+                    )}>
+                      任务列表
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setTargetPage('calendar')}
+                    className={cn(
+                      'flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all',
+                      targetPage === 'calendar'
+                        ? 'border-primary-500 bg-primary-50'
+                        : 'border-slate-200 hover:border-slate-300'
+                    )}
+                  >
+                    <Calendar className={cn(
+                      'w-5 h-5',
+                      targetPage === 'calendar' ? 'text-primary-600' : 'text-slate-400'
+                    )} />
+                    <span className={cn(
+                      'text-sm font-medium',
+                      targetPage === 'calendar' ? 'text-primary-700' : 'text-slate-600'
+                    )}>
+                      任务日历
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <p className="mt-3 text-xs text-slate-500">
                 将保存当前的筛选条件为常用视图
               </p>
             </div>

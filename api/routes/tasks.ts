@@ -409,7 +409,7 @@ router.get('/this-week', (_req: Request, res: Response) => {
 
 router.get('/calendar', (req: Request, res: Response) => {
   try {
-    const { year, month, department = 'all', search, supervisingOnly, status } = req.query
+    const { year, month, department = 'all', search, supervisingOnly, status, overdueOnly, dueSoonOnly } = req.query
 
     if (!year || !month) {
       return res.status(400).json({ success: false, error: '年份和月份不能为空' })
@@ -421,6 +421,9 @@ router.get('/calendar', (req: Request, res: Response) => {
     const daysInMonth = new Date(y, m, 0).getDate()
     const startDate = `${y}-${String(m).padStart(2, '0')}-01`
     const endDate = `${y}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`
+
+    const today = new Date().toISOString().split('T')[0]
+    const { start: dueSoonStart, end: dueSoonEnd } = getDueSoonRange()
 
     let whereClause = `WHERE date(t.deadline) >= date(?) AND date(t.deadline) <= date(?)`
     const params: (string | number)[] = [startDate, endDate]
@@ -443,10 +446,20 @@ router.get('/calendar', (req: Request, res: Response) => {
       )`
     }
 
+    if (overdueOnly === 'true') {
+      whereClause += ' AND t.status != ? AND date(t.deadline) < date(?)'
+      params.push('completed', today)
+    }
+
+    if (dueSoonOnly === 'true') {
+      whereClause += ' AND t.status != ? AND date(t.deadline) >= date(?) AND date(t.deadline) <= date(?)'
+      params.push('completed', dueSoonStart, dueSoonEnd)
+    }
+
     if (status && status !== 'all') {
       whereClause += ' AND t.status = ?'
       params.push(status as string)
-    } else {
+    } else if (overdueOnly !== 'true' && dueSoonOnly !== 'true') {
       whereClause += ` AND t.status != 'completed'`
     }
 

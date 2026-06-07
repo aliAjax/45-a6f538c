@@ -290,6 +290,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (filter.status && filter.status !== 'all') {
           params.set('status', filter.status)
         }
+        if (filter.overdueOnly) {
+          params.set('overdueOnly', 'true')
+        }
+        if (filter.dueSoonOnly) {
+          params.set('dueSoonOnly', 'true')
+        }
       }
       const data = await api.get<CalendarMonthData>(`/tasks/calendar?${params}`)
       set({ calendarData: data, loading: false })

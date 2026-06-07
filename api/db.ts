@@ -165,6 +165,7 @@ function initDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
       filter_json TEXT NOT NULL DEFAULT '{}',
+      target_page TEXT NOT NULL DEFAULT 'tasks',
       sort_order INTEGER NOT NULL DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now', 'localtime')),
       updated_at TEXT DEFAULT (datetime('now', 'localtime'))
@@ -322,6 +323,21 @@ function initDatabase() {
   migrateTaskProgress()
   migrateSupervisionFollowUps()
   migrateTemplateVersions()
+  migrateTaskViewsTargetPage()
+}
+
+function migrateTaskViewsTargetPage() {
+  const columns = db.prepare(`
+    PRAGMA table_info(task_views)
+  `).all() as Array<{ name: string }>
+
+  const hasTargetPage = columns.some((col) => col.name === 'target_page')
+
+  if (!hasTargetPage) {
+    db.exec(`
+      ALTER TABLE task_views ADD COLUMN target_page TEXT NOT NULL DEFAULT 'tasks';
+    `)
+  }
 }
 
 function migrateTemplateVersions() {

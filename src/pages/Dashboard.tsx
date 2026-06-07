@@ -200,10 +200,12 @@ export default function Dashboard() {
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
               {taskViews.slice(0, 8).map((view) => {
                 const isInvalid = view.filter.department && view.filter.department !== 'all' && !departments.includes(view.filter.department)
+                const targetPath = view.targetPage === 'calendar' ? '/calendar' : '/tasks'
+                const TargetIcon = view.targetPage === 'calendar' ? CalendarIcon : CheckSquare
                 return (
                   <button
                     key={view.id}
-                    onClick={() => navigate(`/tasks?view=${view.id}`)}
+                    onClick={() => navigate(`${targetPath}?view=${view.id}`)}
                     className={cn(
                       'p-4 rounded-xl border text-left transition-all group',
                       isInvalid
@@ -216,16 +218,21 @@ export default function Dashboard() {
                         'w-8 h-8 rounded-lg flex items-center justify-center',
                         isInvalid ? 'bg-amber-100' : 'bg-violet-100'
                       )}>
-                        <Layers className={cn(
+                        <TargetIcon className={cn(
                           'w-4 h-4',
                           isInvalid ? 'text-amber-600' : 'text-violet-600'
                         )} />
                       </div>
-                      {isInvalid && (
-                        <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">
-                          已失效
+                      <div className="flex items-center gap-1">
+                        <span className="text-[10px] px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">
+                          {view.targetPage === 'calendar' ? '日历' : '列表'}
                         </span>
-                      )}
+                        {isInvalid && (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">
+                            已失效
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <h3 className={cn(
                       'text-sm font-medium mb-1 line-clamp-1',
