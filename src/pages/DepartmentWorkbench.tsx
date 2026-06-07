@@ -16,6 +16,7 @@ import {
   BellRing,
   Clock3,
   Activity,
+  Lock,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import StatusBadge from '../components/StatusBadge'
@@ -97,6 +98,7 @@ export default function DepartmentWorkbench() {
   const [batchLoading, setBatchLoading] = useState(false)
   const [batchResults, setBatchResults] = useState<BatchUpdateTaskResult[] | null>(null)
   const [batchError, setBatchError] = useState<string | null>(null)
+  const [blockedTasks, setBlockedTasks] = useState<Array<{ id: number; content: string; uncompletedPrereqCount: number }> | null>(null)
   const [activeQueue, setActiveQueue] = useState<QueueType>(
     urlTab === 'risk' ? 'risk' : urlTab === 'overdue' ? 'overdue' : urlTab === 'dueThisWeek' ? 'dueThisWeek' : urlTab === 'completed' ? 'completed' : 'pending'
   )
@@ -230,6 +232,7 @@ export default function DepartmentWorkbench() {
     setBatchLoading(true)
     setBatchResults(null)
     setBatchError(null)
+    setBlockedTasks(null)
 
     try {
       const updates = Array.from(selectedTaskIds).map((id) => ({
@@ -252,8 +255,12 @@ export default function DepartmentWorkbench() {
       }
     } catch (err) {
       console.error('Batch update failed:', err)
-      const error = err as Error
+      const error = err as any
       setBatchError(error.message || '批量更新失败，请稍后重试')
+
+      if (error.responseData?.blockedTasks) {
+        setBlockedTasks(error.responseData.blockedTasks)
+      }
     } finally {
       setBatchLoading(false)
     }
@@ -262,6 +269,8 @@ export default function DepartmentWorkbench() {
   const handleCloseBatchModal = () => {
     if (batchLoading) return
     setShowBatchModal(false)
+    setShowConfirmStep(false)
+    setBlockedTasks(null)
     if (batchResults) {
       if (selectedDepartment) {
         fetchDepartmentWorkbench(selectedDepartment)
@@ -519,6 +528,7 @@ export default function DepartmentWorkbench() {
           loading={batchLoading}
           results={batchResults}
           error={batchError}
+          blockedTasks={blockedTasks}
         />
       )}
     </div>
@@ -905,8 +915,14 @@ function WorkbenchTaskItem({
         )}
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1.5">
+          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
             <StatusBadge status={task.status} size="sm" />
+            {task.isBlocked && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-medium rounded">
+                <Lock className="w-3 h-3" />
+                被阻塞
+              </span>
+            )}
             {task.meetingTitle && (
               <span className="text-xs text-slate-500 truncate">
                 来源：{task.meetingTitle}
@@ -960,6 +976,7 @@ function BatchUpdateModal({
   loading,
   results,
   error,
+  blockedTasks,
 }: {
   isOpen: boolean
   onClose: () => void
@@ -976,6 +993,7 @@ function BatchUpdateModal({
   loading: boolean
   results: BatchUpdateTaskResult[] | null
   error: string | null
+  blockedTasks: Array<{ id: number; content: string; uncompletedPrereqCount: number }> | null
 }) {
   if (!isOpen) return null
 
@@ -984,7 +1002,8 @@ function BatchUpdateModal({
   const hasResults = results !== null
   const allSuccess = hasResults && failCount === 0
   const hasFailures = hasResults && failCount > 0
-  const hasGlobalError = error !== null && !hasResults
+  const hasBlockedError = blockedTasks !== null && blockedTasks.length > 0
+  const hasGlobalError = error !== null && !hasResults && !hasBlockedError
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -1010,7 +1029,70 @@ function BatchUpdateModal({
           </button>
         </div>
 
-        {hasGlobalError ? (
+        {hasBlockedError ? (
+          <div className="p-5">
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl mb-5">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                  <Lock className="w-5 h-5 text-amber-600" />
+                </div>
+                <div>
+                  <p className="font-medium text-amber-800 mb-1">存在阻塞事项</p>
+                  <p className="text-sm text-amber-600">{error}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mb-5">
+              <p className="text-sm font-medium text-slate-700 mb-2">被阻塞的事项：</p>
+              <div className="max-h-60 overflow-y-auto space-y-2">
+                {blockedTasks.map((task) => (
+                  <div
+                    key={task.id}
+                    className="p-3 bg-slate-50 border border-slate-200 rounded-lg"
+                  >
+                    <div className="flex items-start gap-2">
+                      <Lock className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-slate-700 line-clamp-2">{task.content}</p>
+                        <p className="text-xs text-slate-400 mt-1">
+                          #{task.id} · {task.uncompletedPrereqCount} 个前置事项未完成
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-600 mb-5">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-slate-400" />
+                <span>
+                  请先完成这些事项的前置依赖，然后再尝试标记为已完成。您也可以先更新其他状态。
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={onBackStep}
+                disabled={loading}
+                className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors disabled:opacity-50"
+              >
+                返回修改
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-5 py-2.5 text-sm font-medium text-white bg-primary-600 rounded-xl hover:bg-primary-700 transition-colors"
+              >
+                我知道了
+              </button>
+            </div>
+          </div>
+        ) : hasGlobalError ? (
           <div className="p-5">
             <div className="p-4 bg-red-50 border border-red-200 rounded-xl mb-5">
               <div className="flex items-start gap-3">

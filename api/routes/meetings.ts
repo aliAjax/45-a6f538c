@@ -143,6 +143,47 @@ function rowToTask(row: TaskRow): Task {
   return task
 }
 
+function enrichTasksWithDependencies(tasks: Task[]) {
+  const taskMap = new Map<number, Task>()
+  tasks.forEach(task => taskMap.set(task.id, task))
+
+  const dependencyRows = db.prepare(`
+    SELECT task_id, prerequisite_task_id
+    FROM task_dependencies
+    WHERE task_id IN (${tasks.map(() => '?').join(',')})
+  `).all(...tasks.map(t => t.id)) as Array<{ task_id: number; prerequisite_task_id: number }>
+
+  tasks.forEach(task => {
+    const prereqIds: number[] = []
+    const blockingIds: number[] = []
+
+    dependencyRows.forEach(row => {
+      if (row.task_id === task.id) {
+        prereqIds.push(row.prerequisite_task_id)
+      }
+      if (row.prerequisite_task_id === task.id) {
+        blockingIds.push(row.task_id)
+      }
+    })
+
+    task.prerequisiteTaskIds = prereqIds
+    task.blockingTaskIds = blockingIds
+
+    const uncompletedPrereqs = prereqIds.filter(id => {
+      const prereqTask = taskMap.get(id)
+      return prereqTask && prereqTask.status !== 'completed'
+    })
+    task.isBlocked = uncompletedPrereqs.length > 0
+
+    task.prerequisiteTasks = prereqIds
+      .map(id => taskMap.get(id))
+      .filter((t): t is Task => t !== undefined)
+    task.blockingTasks = blockingIds
+      .map(id => taskMap.get(id))
+      .filter((t): t is Task => t !== undefined)
+  })
+}
+
 router.get('/', (req: Request, res: Response) => {
   try {
     const { search, page = '1', pageSize = '10' } = req.query
@@ -202,6 +243,7 @@ router.get('/:id', (req: Request, res: Response) => {
 
     const meeting = rowToMeeting(meetingRow)
     meeting.tasks = taskRows.map(rowToTask)
+    enrichTasksWithDependencies(meeting.tasks)
 
     res.json({ success: true, data: meeting })
   } catch (error) {
@@ -233,14 +275,31 @@ router.post('/', (req: Request, res: Response) => {
       VALUES (?, 'pending', '', datetime('now', 'localtime'))
     `)
 
+    const insertDependency = db.prepare(`
+      INSERT OR IGNORE INTO task_dependencies (task_id, prerequisite_task_id)
+      VALUES (?, ?)
+    `)
+
     const result = db.transaction(() => {
       const meetingResult = insertMeeting.run(title, departments, meetingDate)
       const meetingId = meetingResult.lastInsertRowid as number
 
+      const taskIds: number[] = []
       tasks.forEach(task => {
         const taskResult = insertTask.run(meetingId, task.content, task.department, task.deadline)
         const taskId = taskResult.lastInsertRowid as number
         insertTaskProgress.run(taskId)
+        taskIds.push(taskId)
+      })
+
+      tasks.forEach((task, index) => {
+        if (task.prerequisiteIndexes && task.prerequisiteIndexes.length > 0) {
+          task.prerequisiteIndexes.forEach(prereqIndex => {
+            if (prereqIndex >= 0 && prereqIndex < taskIds.length && prereqIndex !== index) {
+              insertDependency.run(taskIds[index], taskIds[prereqIndex])
+            }
+          })
+        }
       })
 
       return meetingId
@@ -260,6 +319,7 @@ router.post('/', (req: Request, res: Response) => {
 
     const meeting = rowToMeeting(meetingRow)
     meeting.tasks = taskRows.map(rowToTask)
+    enrichTasksWithDependencies(meeting.tasks)
 
     res.status(201).json({ success: true, data: meeting })
   } catch (error) {
@@ -967,6 +1027,11 @@ router.post('/:id/append-tasks', (req: Request, res: Response) => {
       VALUES (?, 'pending', '', datetime('now', 'localtime'))
     `)
 
+    const insertDependency = db.prepare(`
+      INSERT OR IGNORE INTO task_dependencies (task_id, prerequisite_task_id)
+      VALUES (?, ?)
+    `)
+
     const appendedTaskIds: number[] = []
 
     const transaction = db.transaction(() => {
@@ -980,6 +1045,16 @@ router.post('/:id/append-tasks', (req: Request, res: Response) => {
         const taskId = taskResult.lastInsertRowid as number
         insertTaskProgress.run(taskId)
         appendedTaskIds.push(taskId)
+      })
+
+      tasks.forEach((task, index) => {
+        if (task.prerequisiteTaskIds && task.prerequisiteTaskIds.length > 0) {
+          task.prerequisiteTaskIds.forEach(prereqId => {
+            if (prereqId !== appendedTaskIds[index]) {
+              insertDependency.run(appendedTaskIds[index], prereqId)
+            }
+          })
+        }
       })
     })
 
@@ -997,6 +1072,7 @@ router.post('/:id/append-tasks', (req: Request, res: Response) => {
     `).all(...appendedTaskIds) as TaskRow[]
 
     const newTasks = newTaskRows.map(rowToTask)
+    enrichTasksWithDependencies(newTasks)
 
     res.json({ success: true, data: { meetingId: Number(id), tasks: newTasks } })
   } catch (error) {
@@ -1032,6 +1108,11 @@ router.post('/batch-import', (req: Request, res: Response) => {
       VALUES (?, 'pending', '', datetime('now', 'localtime'))
     `)
 
+    const insertDependency = db.prepare(`
+      INSERT OR IGNORE INTO task_dependencies (task_id, prerequisite_task_id)
+      VALUES (?, ?)
+    `)
+
     for (const item of items) {
       const { meeting, decision } = item
       const validTasks = meeting.tasks.filter(
@@ -1060,6 +1141,7 @@ router.post('/batch-import', (req: Request, res: Response) => {
           }
 
           const appendTransaction = db.transaction(() => {
+            const newTaskIds: number[] = []
             validTasks.forEach((task) => {
               const taskResult = insertTask.run(
                 decision.targetMeetingId!,
@@ -1069,6 +1151,17 @@ router.post('/batch-import', (req: Request, res: Response) => {
               )
               const taskId = taskResult.lastInsertRowid as number
               insertTaskProgress.run(taskId)
+              newTaskIds.push(taskId)
+            })
+
+            validTasks.forEach((task, index) => {
+              if (task.prerequisiteIndexes && task.prerequisiteIndexes.length > 0) {
+                task.prerequisiteIndexes.forEach(prereqIndex => {
+                  if (prereqIndex >= 0 && prereqIndex < newTaskIds.length && prereqIndex !== index) {
+                    insertDependency.run(newTaskIds[index], newTaskIds[prereqIndex])
+                  }
+                })
+              }
             })
           })
           appendTransaction()
@@ -1095,6 +1188,7 @@ router.post('/batch-import', (req: Request, res: Response) => {
             )
             newMeetingId = meetingResult.lastInsertRowid as number
 
+            const newTaskIds: number[] = []
             validTasks.forEach((task) => {
               const taskResult = insertTask.run(
                 newMeetingId!,
@@ -1104,6 +1198,17 @@ router.post('/batch-import', (req: Request, res: Response) => {
               )
               const taskId = taskResult.lastInsertRowid as number
               insertTaskProgress.run(taskId)
+              newTaskIds.push(taskId)
+            })
+
+            validTasks.forEach((task, index) => {
+              if (task.prerequisiteIndexes && task.prerequisiteIndexes.length > 0) {
+                task.prerequisiteIndexes.forEach(prereqIndex => {
+                  if (prereqIndex >= 0 && prereqIndex < newTaskIds.length && prereqIndex !== index) {
+                    insertDependency.run(newTaskIds[index], newTaskIds[prereqIndex])
+                  }
+                })
+              }
             })
           })
           createTransaction()

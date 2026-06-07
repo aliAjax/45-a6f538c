@@ -21,6 +21,11 @@ export interface Task {
   meetingTitle?: string
   hasActiveSupervision?: boolean
   activeSupervision?: TaskSupervision | null
+  isBlocked?: boolean
+  prerequisiteTaskIds?: number[]
+  prerequisiteTasks?: Task[]
+  blockingTaskIds?: number[]
+  blockingTasks?: Task[]
 }
 
 export interface TaskSupervision {
@@ -83,12 +88,14 @@ export interface CreateMeetingRequest {
     content: string
     department: string
     deadline: string
+    prerequisiteIndexes?: number[]
   }>
 }
 
 export interface UpdateTaskRequest {
   status?: 'pending' | 'in_progress' | 'completed'
   progress?: string
+  prerequisiteTaskIds?: number[]
 }
 
 export interface MeetingTemplate {
@@ -215,6 +222,7 @@ export interface ParsedTask {
   content: string
   department: string
   deadline: string
+  prerequisiteIndexes?: number[]
 }
 
 export interface ParsedMeeting {
@@ -323,6 +331,7 @@ export interface AppendTasksRequest {
     content: string
     department: string
     deadline: string
+    prerequisiteTaskIds?: number[]
   }>
 }
 

@@ -13,6 +13,8 @@ import {
   ChevronUp,
   BellRing,
   CalendarDays,
+  Lock,
+  Link2,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import StatusBadge from '../components/StatusBadge'
@@ -206,6 +208,7 @@ export default function MeetingDetail() {
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onUpdated={handleUpdated}
+        allTasks={meeting?.tasks}
       />
     </div>
   )
@@ -267,6 +270,12 @@ function TaskItem({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2 flex-wrap">
             <StatusBadge status={task.status} size="sm" />
+            {task.isBlocked && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-medium rounded">
+                <Lock className="w-3 h-3" />
+                被阻塞
+              </span>
+            )}
             {task.hasActiveSupervision && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-rose-50 text-rose-600 text-[10px] font-medium rounded">
                 <BellRing className="w-3 h-3" />
@@ -324,7 +333,41 @@ function TaskItem({
             </div>
           )}
 
-          <div className={cn("flex items-center gap-3", (task.progress || task.activeSupervision?.latestFollowUp) ? "mt-3" : "mt-3 pt-3 border-t border-slate-200")}>
+          {task.prerequisiteTasks && task.prerequisiteTasks.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-slate-200">
+              <p className="text-xs text-slate-500 font-medium mb-1.5 flex items-center gap-1">
+                <Link2 className="w-3 h-3" />
+                前置事项：
+              </p>
+              <div className="space-y-1">
+                {task.prerequisiteTasks.map((prereq) => (
+                  <div key={prereq.id} className="text-xs text-slate-600 flex items-center gap-2">
+                    <StatusBadge status={prereq.status} size="sm" />
+                    <span className="truncate">{prereq.content}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {task.blockingTasks && task.blockingTasks.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-slate-200">
+              <p className="text-xs text-slate-500 font-medium mb-1.5 flex items-center gap-1">
+                <Link2 className="w-3 h-3" />
+                阻塞事项：
+              </p>
+              <div className="space-y-1">
+                {task.blockingTasks.map((blocking) => (
+                  <div key={blocking.id} className="text-xs text-slate-600 flex items-center gap-2">
+                    <StatusBadge status={blocking.status} size="sm" />
+                    <span className="truncate">{blocking.content}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className={cn("flex items-center gap-3", (task.progress || task.activeSupervision?.latestFollowUp || (task.prerequisiteTasks && task.prerequisiteTasks.length > 0) || (task.blockingTasks && task.blockingTasks.length > 0)) ? "mt-3" : "mt-3 pt-3 border-t border-slate-200")}>
             <button
               onClick={handleToggleExpand}
               className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-primary-600 transition-colors"

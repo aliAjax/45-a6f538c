@@ -1,20 +1,23 @@
 import { useState, useEffect, useCallback } from 'react'
-import { X, CheckCircle, Clock, AlertCircle, BellRing, Plus, XCircle, CalendarDays, MessageSquare } from 'lucide-react'
+import { X, CheckCircle, Clock, AlertCircle, BellRing, Plus, XCircle, CalendarDays, MessageSquare, Link2, Lock } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
-import type { Task, TaskProgress, TaskSupervision, SupervisionFollowUp } from '../../shared/types'
+import type { Task, TaskProgress, TaskSupervision, SupervisionFollowUp, UpdateTaskRequest } from '../../shared/types'
 import { cn } from '../lib/utils'
 import ProgressTimeline from './ProgressTimeline'
+import StatusBadge from './StatusBadge'
 
 interface TaskUpdateModalProps {
   task: Task | null
   isOpen: boolean
   onClose: () => void
   onUpdated?: () => void
+  allTasks?: Task[]
 }
 
-export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: TaskUpdateModalProps) {
+export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated, allTasks = [] }: TaskUpdateModalProps) {
   const [progress, setProgress] = useState('')
   const [status, setStatus] = useState<Task['status']>('pending')
+  const [prerequisiteTaskIds, setPrerequisiteTaskIds] = useState<number[]>([])
   const updateTask = useAppStore((state) => state.updateTask)
   const fetchTaskProgress = useAppStore((state) => state.fetchTaskProgress)
   const fetchTaskSupervisions = useAppStore((state) => state.fetchTaskSupervisions)
@@ -86,6 +89,7 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
     if (task) {
       setProgress(task.progress || '')
       setStatus(task.status)
+      setPrerequisiteTaskIds(task.prerequisiteTaskIds || [])
       setError('')
       setSuperviseNote('')
       setNextFollowUpDate('')
@@ -106,7 +110,11 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
     setError('')
 
     try {
-      await updateTask(task.id, { status, progress })
+      const updateData: UpdateTaskRequest = { status, progress }
+      if (allTasks.length > 0) {
+        updateData.prerequisiteTaskIds = prerequisiteTaskIds
+      }
+      await updateTask(task.id, updateData)
       await loadProgressList(task.id)
       await loadSupervisionList(task.id)
       onClose()
@@ -294,6 +302,58 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
                     )}
                   </>
                 )}
+              </div>
+            )}
+
+            {task.isBlocked && (
+              <div className="mb-5 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                <div className="flex items-center gap-2 mb-2">
+                  <Lock className="w-4 h-4 text-slate-600" />
+                  <span className="text-sm font-medium text-slate-700">当前被阻塞</span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  前置事项未完成，无法标记为已完成。请先完成前置事项。
+                </p>
+              </div>
+            )}
+
+            {allTasks.length > 0 && (
+              <div className="mb-5">
+                <label className="text-sm font-medium text-slate-700 mb-2 block flex items-center gap-1">
+                  <Link2 className="w-4 h-4" />
+                  前置事项
+                </label>
+                <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl p-2 space-y-1">
+                  {allTasks.filter(t => t.id !== task.id).map((t) => (
+                    <label
+                      key={t.id}
+                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={prerequisiteTaskIds.includes(t.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setPrerequisiteTaskIds([...prerequisiteTaskIds, t.id])
+                          } else {
+                            setPrerequisiteTaskIds(prerequisiteTaskIds.filter(id => id !== t.id))
+                          }
+                        }}
+                        className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-slate-700 truncate">{t.content}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <StatusBadge status={t.status} size="sm" />
+                          <span className="text-xs text-slate-500">{t.department}</span>
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-400 mt-1.5">
+                  选择同会议内需先完成的事项
+                </p>
               </div>
             )}
 

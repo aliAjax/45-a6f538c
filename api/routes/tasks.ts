@@ -10,6 +10,7 @@ import type {
   BatchUpdateTaskRequest,
   BatchUpdateTaskResponse,
   BatchUpdateTaskResult,
+  BatchUpdateTaskItem,
   DepartmentWorkbenchData,
   DepartmentRiskDetail,
   DepartmentRiskStats,
@@ -136,6 +137,63 @@ function rowToTask(row: TaskRowWithTitle): Task {
   return task
 }
 
+function enrichTasksWithDependencies(tasks: Task[]) {
+  if (tasks.length === 0) return
+
+  const taskMap = new Map<number, Task>()
+  tasks.forEach(task => taskMap.set(task.id, task))
+
+  const allRelatedIds = new Set<number>()
+  tasks.forEach(task => allRelatedIds.add(task.id))
+
+  const dependencyRows = db.prepare(`
+    SELECT td.task_id, td.prerequisite_task_id,
+           t.status as prereq_status,
+           t.content as prereq_content,
+           t.meeting_id as prereq_meeting_id
+    FROM task_dependencies td
+    LEFT JOIN tasks t ON td.prerequisite_task_id = t.id
+    WHERE td.task_id IN (${tasks.map(() => '?').join(',')})
+       OR td.prerequisite_task_id IN (${tasks.map(() => '?').join(',')})
+  `).all(...[...tasks.map(t => t.id), ...tasks.map(t => t.id)]) as Array<{
+    task_id: number
+    prerequisite_task_id: number
+    prereq_status: string
+    prereq_content: string
+    prereq_meeting_id: number
+  }>
+
+  tasks.forEach(task => {
+    const prereqIds: number[] = []
+    const blockingIds: number[] = []
+
+    dependencyRows.forEach(row => {
+      if (row.task_id === task.id) {
+        prereqIds.push(row.prerequisite_task_id)
+      }
+      if (row.prerequisite_task_id === task.id) {
+        blockingIds.push(row.task_id)
+      }
+    })
+
+    task.prerequisiteTaskIds = prereqIds
+    task.blockingTaskIds = blockingIds
+
+    const uncompletedPrereqs = prereqIds.filter(id => {
+      const prereqTask = taskMap.get(id)
+      return prereqTask && prereqTask.status !== 'completed'
+    })
+    task.isBlocked = uncompletedPrereqs.length > 0
+
+    task.prerequisiteTasks = prereqIds
+      .map(id => taskMap.get(id))
+      .filter((t): t is Task => t !== undefined)
+    task.blockingTasks = blockingIds
+      .map(id => taskMap.get(id))
+      .filter((t): t is Task => t !== undefined)
+  })
+}
+
 function getThisWeekRange(): { start: string; end: string } {
   const now = new Date()
   const day = now.getDay()
@@ -215,6 +273,7 @@ router.get('/', (req: Request, res: Response) => {
     `).all(...params, Number(pageSize), offset) as TaskRowWithTitle[]
 
     const tasks = rows.map(rowToTask)
+    enrichTasksWithDependencies(tasks)
 
     res.json({
       success: true,
@@ -248,6 +307,7 @@ router.get('/overdue', (_req: Request, res: Response) => {
     `).all(today) as TaskRowWithTitle[]
 
     const tasks = rows.map(rowToTask)
+    enrichTasksWithDependencies(tasks)
 
     res.json({ success: true, data: tasks })
   } catch (error) {
@@ -277,6 +337,7 @@ router.get('/this-week', (_req: Request, res: Response) => {
     `).all(start, end, today) as TaskRowWithTitle[]
 
     const tasks = rows.map(rowToTask)
+    enrichTasksWithDependencies(tasks)
 
     res.json({ success: true, data: tasks })
   } catch (error) {
@@ -321,6 +382,7 @@ router.get('/calendar', (req: Request, res: Response) => {
     `).all(...params) as TaskRowWithTitle[]
 
     const tasks = rows.map(rowToTask)
+    enrichTasksWithDependencies(tasks)
 
     const daysMap = new Map<string, CalendarDayTasks>()
 
@@ -355,11 +417,29 @@ router.get('/calendar', (req: Request, res: Response) => {
 router.patch('/:id', (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const { status, progress } = req.body as UpdateTaskRequest
+    const { status, progress, prerequisiteTaskIds } = req.body as UpdateTaskRequest
 
     const taskRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as TaskRowWithTitle | undefined
     if (!taskRow) {
       return res.status(404).json({ success: false, error: '事项不存在' })
+    }
+
+    if (status === 'completed') {
+      const uncompletedPrereqs = db.prepare(`
+        SELECT t.id, t.content, t.status
+        FROM task_dependencies td
+        JOIN tasks t ON td.prerequisite_task_id = t.id
+        WHERE td.task_id = ? AND t.status != 'completed'
+      `).all(Number(id)) as Array<{ id: number; content: string; status: string }>
+
+      if (uncompletedPrereqs.length > 0) {
+        const prereqNames = uncompletedPrereqs.map(p => p.content.slice(0, 20)).join('、')
+        return res.status(400).json({
+          success: false,
+          error: `无法标记为完成，还有 ${uncompletedPrereqs.length} 个前置事项未完成：${prereqNames}...`,
+          blockedBy: uncompletedPrereqs,
+        })
+      }
     }
 
     const fields: string[] = []
@@ -375,38 +455,63 @@ router.patch('/:id', (req: Request, res: Response) => {
       values.push(progress)
     }
 
-    if (fields.length === 0) {
-      return res.status(400).json({ success: false, error: '没有需要更新的字段' })
-    }
+    const hasFieldUpdates = fields.length > 0
 
-    fields.push("updated_at = datetime('now', 'localtime')")
-    values.push(Number(id))
+    if (hasFieldUpdates) {
+      fields.push("updated_at = datetime('now', 'localtime')")
+      values.push(Number(id))
+    }
 
     const newStatus = status !== undefined ? status : taskRow.status
     const newProgress = progress !== undefined ? progress : taskRow.progress || ''
 
     db.transaction(() => {
-      const stmt = db.prepare(`
-        UPDATE tasks
-        SET ${fields.join(', ')}
-        WHERE id = ?
-      `)
-      stmt.run(...values)
+      if (hasFieldUpdates) {
+        const stmt = db.prepare(`
+          UPDATE tasks
+          SET ${fields.join(', ')}
+          WHERE id = ?
+        `)
+        stmt.run(...values)
 
-      const insertProgress = db.prepare(`
-        INSERT INTO task_progress (task_id, status, progress)
-        VALUES (?, ?, ?)
-      `)
-      insertProgress.run(Number(id), newStatus, newProgress)
+        const insertProgress = db.prepare(`
+          INSERT INTO task_progress (task_id, status, progress)
+          VALUES (?, ?, ?)
+        `)
+        insertProgress.run(Number(id), newStatus, newProgress)
 
-      if (newStatus === 'completed') {
-        db.prepare(`
-          UPDATE task_supervisions
-          SET status = 'closed',
-              closed_at = datetime('now', 'localtime'),
-              updated_at = datetime('now', 'localtime')
-          WHERE task_id = ? AND status = 'active'
-        `).run(Number(id))
+        if (newStatus === 'completed') {
+          db.prepare(`
+            UPDATE task_supervisions
+            SET status = 'closed',
+                closed_at = datetime('now', 'localtime'),
+                updated_at = datetime('now', 'localtime')
+            WHERE task_id = ? AND status = 'active'
+          `).run(Number(id))
+        }
+      }
+
+      if (prerequisiteTaskIds !== undefined) {
+        const taskId = Number(id)
+        const meetingId = taskRow.meeting_id
+
+        db.prepare(`DELETE FROM task_dependencies WHERE task_id = ?`).run(taskId)
+
+        const insertDep = db.prepare(`
+          INSERT OR IGNORE INTO task_dependencies (task_id, prerequisite_task_id)
+          VALUES (?, ?)
+        `)
+
+        prerequisiteTaskIds.forEach(prereqId => {
+          if (prereqId !== taskId) {
+            const prereqRow = db.prepare(
+              'SELECT meeting_id FROM tasks WHERE id = ?'
+            ).get(prereqId) as { meeting_id: number } | undefined
+            if (prereqRow && prereqRow.meeting_id === meetingId) {
+              insertDep.run(taskId, prereqId)
+            }
+          }
+        })
       }
     })()
 
@@ -422,6 +527,7 @@ router.patch('/:id', (req: Request, res: Response) => {
     `).get(id) as TaskRowWithTitle
 
     const task = rowToTask(updatedRow)
+    enrichTasksWithDependencies([task])
 
     res.json({ success: true, data: task })
   } catch (error) {
@@ -470,41 +576,138 @@ router.patch('/batch/update', (req: Request, res: Response) => {
     let successCount = 0
     let failCount = 0
 
-    for (const update of updates) {
+    const updateMap = new Map<number, BatchUpdateTaskItem>()
+    updates.forEach(u => updateMap.set(u.id, u))
+
+    const taskRows = new Map<number, TaskRowWithTitle>()
+    updates.forEach(update => {
+      const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(update.id) as TaskRowWithTitle | undefined
+      if (row) taskRows.set(update.id, row)
+    })
+
+    const allPrereqMap = new Map<number, number[]>()
+    const allBlockingMap = new Map<number, number[]>()
+
+    const depRows = db.prepare(`
+      SELECT task_id, prerequisite_task_id
+      FROM task_dependencies
+      WHERE task_id IN (${updates.map(() => '?').join(',')})
+         OR prerequisite_task_id IN (${updates.map(() => '?').join(',')})
+    `).all(...[...updates.map(u => u.id), ...updates.map(u => u.id)]) as Array<{
+      task_id: number
+      prerequisite_task_id: number
+    }>
+
+    depRows.forEach(row => {
+      const prereqs = allPrereqMap.get(row.task_id) || []
+      prereqs.push(row.prerequisite_task_id)
+      allPrereqMap.set(row.task_id, prereqs)
+
+      const blocking = allBlockingMap.get(row.prerequisite_task_id) || []
+      blocking.push(row.task_id)
+      allBlockingMap.set(row.prerequisite_task_id, blocking)
+    })
+
+    function isTaskBlocked(taskId: number, completingSet: Set<number>): boolean {
+      const prereqs = allPrereqMap.get(taskId) || []
+      for (const prereqId of prereqs) {
+        const prereqRow = taskRows.get(prereqId)
+        const prereqUpdate = updateMap.get(prereqId)
+        const willBeCompleted = prereqUpdate?.status === 'completed'
+        const isCompleted = prereqRow?.status === 'completed'
+        if (!isCompleted && !willBeCompleted) {
+          return true
+        }
+        if (!prereqRow && !completingSet.has(prereqId)) {
+          const actualRow = db.prepare('SELECT status FROM tasks WHERE id = ?').get(prereqId) as { status: string } | undefined
+          if (actualRow && actualRow.status !== 'completed') {
+            return true
+          }
+        }
+      }
+      return false
+    }
+
+    const toComplete: number[] = []
+    updates.forEach(update => {
+      if (update.status === 'completed') {
+        toComplete.push(update.id)
+      }
+    })
+
+    const blockedTasks: number[] = []
+    if (toComplete.length > 0) {
+      const completingSet = new Set<number>(toComplete)
+      toComplete.forEach(taskId => {
+        if (isTaskBlocked(taskId, completingSet)) {
+          blockedTasks.push(taskId)
+        }
+      })
+    }
+
+    if (blockedTasks.length > 0) {
+      const blockedDetails = blockedTasks.map(taskId => {
+        const task = taskRows.get(taskId)
+        const prereqs = allPrereqMap.get(taskId) || []
+        const uncompletedPrereqs = prereqs.filter(prereqId => {
+          const prereqTask = taskRows.get(prereqId)
+          const prereqUpdate = updateMap.get(prereqId)
+          return prereqTask?.status !== 'completed' && prereqUpdate?.status !== 'completed'
+        })
+        return {
+          id: taskId,
+          content: task?.content || '',
+          uncompletedPrereqCount: uncompletedPrereqs.length,
+        }
+      })
+
+      return res.status(400).json({
+        success: false,
+        error: `有 ${blockedTasks.length} 个事项因前置事项未完成而无法标记为已完成`,
+        blockedTasks: blockedDetails,
+      })
+    }
+
+    const processed = new Set<number>()
+
+    function processUpdate(update: BatchUpdateTaskItem) {
+      if (processed.has(update.id)) return
+
+      const taskRow = taskRows.get(update.id)
+      if (!taskRow) {
+        results.push({ id: update.id, success: false, error: '事项不存在' })
+        failCount++
+        processed.add(update.id)
+        return
+      }
+
+      const fields: string[] = []
+      const values: (string | number)[] = []
+
+      if (update.status !== undefined) {
+        fields.push('status = ?')
+        values.push(update.status)
+      }
+
+      if (update.progress !== undefined) {
+        fields.push('progress = ?')
+        values.push(update.progress)
+      }
+
+      if (fields.length === 0) {
+        results.push({ id: update.id, success: false, error: '没有需要更新的字段' })
+        failCount++
+        processed.add(update.id)
+        return
+      }
+
+      fields.push("updated_at = datetime('now', 'localtime')")
+      values.push(Number(update.id))
+
+      const newStatus = update.status !== undefined ? update.status : taskRow.status
+      const newProgress = update.progress !== undefined ? update.progress : taskRow.progress || ''
+
       try {
-        const taskRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(update.id) as TaskRowWithTitle | undefined
-
-        if (!taskRow) {
-          results.push({ id: update.id, success: false, error: '事项不存在' })
-          failCount++
-          continue
-        }
-
-        const fields: string[] = []
-        const values: (string | number)[] = []
-
-        if (update.status !== undefined) {
-          fields.push('status = ?')
-          values.push(update.status)
-        }
-
-        if (update.progress !== undefined) {
-          fields.push('progress = ?')
-          values.push(update.progress)
-        }
-
-        if (fields.length === 0) {
-          results.push({ id: update.id, success: false, error: '没有需要更新的字段' })
-          failCount++
-          continue
-        }
-
-        fields.push("updated_at = datetime('now', 'localtime')")
-        values.push(Number(update.id))
-
-        const newStatus = update.status !== undefined ? update.status : taskRow.status
-        const newProgress = update.progress !== undefined ? update.progress : taskRow.progress || ''
-
         const updateTransaction = db.transaction(() => {
           const stmt = db.prepare(`
             UPDATE tasks
@@ -552,6 +755,43 @@ router.patch('/batch/update', (req: Request, res: Response) => {
         results.push({ id: update.id, success: false, error: '更新失败' })
         failCount++
       }
+      processed.add(update.id)
+    }
+
+    function topologicalSortAndProcess(ids: number[]) {
+      const visited = new Set<number>()
+      const temp = new Set<number>()
+
+      function visit(id: number) {
+        if (visited.has(id)) return
+        if (temp.has(id)) return
+
+        temp.add(id)
+        const prereqs = allPrereqMap.get(id) || []
+        for (const prereqId of prereqs) {
+          if (updateMap.has(prereqId)) {
+            visit(prereqId)
+          }
+        }
+        temp.delete(id)
+        visited.add(id)
+
+        const update = updateMap.get(id)
+        if (update) {
+          processUpdate(update)
+        }
+      }
+
+      ids.forEach(id => visit(id))
+    }
+
+    topologicalSortAndProcess(updates.map(u => u.id))
+
+    const taskResults = results
+      .filter(r => r.success && r.task)
+      .map(r => r.task!)
+    if (taskResults.length > 0) {
+      enrichTasksWithDependencies(taskResults)
     }
 
     const response: BatchUpdateTaskResponse = {
@@ -636,6 +876,9 @@ router.get('/workbench/:department', (req: Request, res: Response) => {
     const overdue = overdueRows.map(rowToTask)
     const dueThisWeek = dueThisWeekRows.map(rowToTask)
     const completed = completedRows.map(rowToTask)
+
+    const allTasks = [...pending, ...overdue, ...dueThisWeek, ...completed]
+    enrichTasksWithDependencies(allTasks)
 
     const totalCountRow = db.prepare(`
       SELECT COUNT(*) as count
@@ -799,6 +1042,9 @@ router.get('/risk/:department', (req: Request, res: Response) => {
     const dueSoonTasks = dueSoonRows.map(rowToTask)
     const supervisingTasks = supervisingRows.map(rowToTask)
     const longNoUpdateTasks = longNoUpdateRows.map(rowToTask)
+
+    const allRiskTasks = [...overdueTasks, ...dueSoonTasks, ...supervisingTasks, ...longNoUpdateTasks]
+    enrichTasksWithDependencies(allRiskTasks)
 
     const riskTaskIds = new Set<number>()
     overdueTasks.forEach((t) => riskTaskIds.add(t.id))

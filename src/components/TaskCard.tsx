@@ -1,4 +1,4 @@
-import { Calendar, Building2, Clock, ChevronRight, BellRing, CalendarDays } from 'lucide-react'
+import { Calendar, Building2, Clock, ChevronRight, BellRing, CalendarDays, Lock } from 'lucide-react'
 import StatusBadge from './StatusBadge'
 import { cn } from '../lib/utils'
 import type { Task } from '../../shared/types'
@@ -43,8 +43,14 @@ export default function TaskCard({ task, variant = 'default', onClick }: TaskCar
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
             <StatusBadge status={task.status} size="sm" />
+            {task.isBlocked && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-medium rounded">
+                <Lock className="w-3 h-3" />
+                被阻塞
+              </span>
+            )}
             {task.hasActiveSupervision && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-rose-50 text-rose-600 text-[10px] font-medium rounded">
                 <BellRing className="w-3 h-3" />

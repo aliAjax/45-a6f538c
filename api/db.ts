@@ -122,6 +122,19 @@ function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_supervision_follow_ups_supervision_id ON supervision_follow_ups(supervision_id);
     CREATE INDEX IF NOT EXISTS idx_supervision_follow_ups_created_at ON supervision_follow_ups(created_at);
+
+    CREATE TABLE IF NOT EXISTS task_dependencies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER NOT NULL,
+      prerequisite_task_id INTEGER NOT NULL,
+      created_at TEXT DEFAULT (datetime('now', 'localtime')),
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+      FOREIGN KEY (prerequisite_task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+      UNIQUE(task_id, prerequisite_task_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_task_dependencies_task_id ON task_dependencies(task_id);
+    CREATE INDEX IF NOT EXISTS idx_task_dependencies_prerequisite_task_id ON task_dependencies(prerequisite_task_id);
   `)
 
   const meetingCount = db.prepare('SELECT COUNT(*) as count FROM meetings').get() as { count: number }

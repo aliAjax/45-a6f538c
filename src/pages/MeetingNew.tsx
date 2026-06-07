@@ -11,6 +11,7 @@ import {
   LayoutTemplate,
   X,
   Check,
+  Link2,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import type { MeetingTemplate } from '../../shared/types'
@@ -19,6 +20,7 @@ interface TaskFormData {
   content: string
   department: string
   deadline: string
+  prerequisiteIndexes: number[]
 }
 
 export default function MeetingNew() {
@@ -30,7 +32,7 @@ export default function MeetingNew() {
   const [meetingDepartments, setMeetingDepartments] = useState('')
   const [meetingDate, setMeetingDate] = useState('')
   const [tasks, setTasks] = useState<TaskFormData[]>([
-    { content: '', department: '', deadline: '' },
+    { content: '', department: '', deadline: '', prerequisiteIndexes: [] },
   ])
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -59,6 +61,7 @@ export default function MeetingNew() {
         content: t.content,
         department: t.department,
         deadline: '',
+        prerequisiteIndexes: [] as number[],
       }))
       if (newTasks.length > 0) {
         setTasks(newTasks)
@@ -75,22 +78,40 @@ export default function MeetingNew() {
     setSelectedTemplate(null)
     setTitle('')
     setMeetingDepartments('')
-    setTasks([{ content: '', department: '', deadline: '' }])
+    setTasks([{ content: '', department: '', deadline: '', prerequisiteIndexes: [] }])
   }
 
   const addTask = () => {
-    setTasks([...tasks, { content: '', department: '', deadline: '' }])
+    setTasks([...tasks, { content: '', department: '', deadline: '', prerequisiteIndexes: [] }])
   }
 
   const removeTask = (index: number) => {
     if (tasks.length > 1) {
-      setTasks(tasks.filter((_, i) => i !== index))
+      const newTasks = tasks.filter((_, i) => i !== index)
+      const adjustedTasks = newTasks.map((task, i) => ({
+        ...task,
+        prerequisiteIndexes: task.prerequisiteIndexes
+          .filter(idx => idx !== index)
+          .map(idx => idx > index ? idx - 1 : idx)
+      }))
+      setTasks(adjustedTasks)
     }
   }
 
-  const updateTask = (index: number, field: keyof TaskFormData, value: string) => {
+  const updateTask = (index: number, field: 'content' | 'department' | 'deadline', value: string) => {
     const newTasks = [...tasks]
     newTasks[index][field] = value
+    setTasks(newTasks)
+  }
+
+  const togglePrerequisite = (taskIndex: number, prereqIndex: number) => {
+    const newTasks = [...tasks]
+    const current = newTasks[taskIndex].prerequisiteIndexes
+    if (current.includes(prereqIndex)) {
+      newTasks[taskIndex].prerequisiteIndexes = current.filter(i => i !== prereqIndex)
+    } else {
+      newTasks[taskIndex].prerequisiteIndexes = [...current, prereqIndex]
+    }
     setTasks(newTasks)
   }
 
@@ -127,12 +148,36 @@ export default function MeetingNew() {
       return
     }
 
+    const originalIndexToValidIndex = new Map<number, number>()
+    let validIdx = 0
+    tasks.forEach((task, origIdx) => {
+      if (task.content.trim() && task.department && task.deadline) {
+        originalIndexToValidIndex.set(origIdx, validIdx)
+        validIdx++
+      }
+    })
+
+    const tasksWithPrereqs = validTasks.map((task, idx) => {
+      const origIdx = Array.from(originalIndexToValidIndex.entries())
+        .find(([, vIdx]) => vIdx === idx)?.[0]
+      const origPrereqs = task.prerequisiteIndexes || []
+      const validPrereqs = origPrereqs
+        .filter(origPrereqIdx => originalIndexToValidIndex.has(origPrereqIdx))
+        .map(origPrereqIdx => originalIndexToValidIndex.get(origPrereqIdx)!)
+      return {
+        content: task.content.trim(),
+        department: task.department,
+        deadline: task.deadline,
+        prerequisiteIndexes: validPrereqs,
+      }
+    })
+
     try {
       const meeting = await createMeeting({
         title: title.trim(),
         departments: meetingDepartments.trim(),
         meetingDate,
-        tasks: validTasks,
+        tasks: tasksWithPrereqs,
       })
       navigate(`/meetings/${meeting.id}`)
     } catch (err) {
@@ -330,6 +375,36 @@ export default function MeetingNew() {
                       />
                     </div>
                   </div>
+
+                  {index > 0 && (
+                    <div>
+                      <label className="block text-xs font-medium text-slate-500 mb-1 flex items-center gap-1">
+                        <Link2 className="w-3.5 h-3.5" />
+                        前置事项
+                      </label>
+                      <div className="max-h-32 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-1 bg-white">
+                        {tasks.slice(0, index).map((_, prereqIndex) => (
+                          <label
+                            key={prereqIndex}
+                            className="flex items-center gap-2 p-1.5 rounded hover:bg-slate-50 cursor-pointer transition-colors"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={task.prerequisiteIndexes.includes(prereqIndex)}
+                              onChange={() => togglePrerequisite(index, prereqIndex)}
+                              className="w-3.5 h-3.5 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                            />
+                            <span className="text-xs text-slate-600 truncate">
+                              事项 {prereqIndex + 1}：{tasks[prereqIndex].content || '(未填写)'}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        选择需先完成的事项
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

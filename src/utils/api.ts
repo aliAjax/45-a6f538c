@@ -4,6 +4,20 @@ interface ApiResponse<T> {
   success: boolean
   data: T
   error?: string
+  blockedTasks?: Array<{ id: number; content: string; uncompletedPrereqCount: number }>
+  [key: string]: unknown
+}
+
+export class ApiError extends Error {
+  status: number
+  responseData: Record<string, unknown>
+
+  constructor(message: string, status: number, responseData: Record<string, unknown>) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.responseData = responseData
+  }
 }
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
@@ -18,7 +32,11 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
   const data = (await response.json()) as ApiResponse<T>
 
   if (!response.ok || !data.success) {
-    throw new Error(data.error || '请求失败')
+    throw new ApiError(
+      data.error || '请求失败',
+      response.status,
+      data as unknown as Record<string, unknown>
+    )
   }
 
   return data.data

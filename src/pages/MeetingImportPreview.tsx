@@ -18,6 +18,7 @@ import {
   FolderPlus,
   PlusCircle,
   Copy,
+  Link2,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import type {
@@ -104,6 +105,7 @@ export default function MeetingImportPreview() {
           tasks: m.tasks.map((t) => ({
             ...t,
             deadline: isValidDate(t.deadline) ? t.deadline : '',
+            prerequisiteIndexes: t.prerequisiteIndexes || [],
           })),
         }))
         setMeetings(normalized)
@@ -206,6 +208,7 @@ export default function MeetingImportPreview() {
       content: '',
       department: '',
       deadline: '',
+      prerequisiteIndexes: [],
     })
     setMeetings(newMeetings)
   }
@@ -213,7 +216,15 @@ export default function MeetingImportPreview() {
   const removeTask = (meetingIndex: number, taskIndex: number) => {
     const newMeetings = [...meetings]
     if (newMeetings[meetingIndex].tasks.length > 1) {
-      newMeetings[meetingIndex].tasks.splice(taskIndex, 1)
+      const tasks = newMeetings[meetingIndex].tasks
+      tasks.splice(taskIndex, 1)
+      const adjustedTasks = tasks.map((task, i) => ({
+        ...task,
+        prerequisiteIndexes: (task.prerequisiteIndexes || [])
+          .filter(idx => idx !== taskIndex)
+          .map(idx => idx > taskIndex ? idx - 1 : idx)
+      }))
+      newMeetings[meetingIndex].tasks = adjustedTasks
       setMeetings(newMeetings)
     }
   }
@@ -232,6 +243,22 @@ export default function MeetingImportPreview() {
     setMeetings(newMeetings)
   }
 
+  const togglePrerequisite = (
+    meetingIndex: number,
+    taskIndex: number,
+    prereqIndex: number
+  ) => {
+    const newMeetings = [...meetings]
+    const task = newMeetings[meetingIndex].tasks[taskIndex]
+    const current = task.prerequisiteIndexes || []
+    if (current.includes(prereqIndex)) {
+      task.prerequisiteIndexes = current.filter(i => i !== prereqIndex)
+    } else {
+      task.prerequisiteIndexes = [...current, prereqIndex]
+    }
+    setMeetings(newMeetings)
+  }
+
   const addMeeting = () => {
     setMeetings([
       ...meetings,
@@ -239,7 +266,7 @@ export default function MeetingImportPreview() {
         title: '',
         departments: '',
         meetingDate: '',
-        tasks: [{ content: '', department: '', deadline: '' }],
+        tasks: [{ content: '', department: '', deadline: '', prerequisiteIndexes: [] }],
       },
     ])
     setExpandedMeetings(new Set([...expandedMeetings, meetings.length]))
@@ -331,16 +358,37 @@ export default function MeetingImportPreview() {
         const validTasks = meeting.tasks.filter(
           (t) => t.content.trim() && t.department && t.deadline && isValidDate(t.deadline)
         )
+
+        const originalIndexToValidIndex = new Map<number, number>()
+        let validIdx = 0
+        meeting.tasks.forEach((task, origIdx) => {
+          if (task.content.trim() && task.department && task.deadline && isValidDate(task.deadline)) {
+            originalIndexToValidIndex.set(origIdx, validIdx)
+            validIdx++
+          }
+        })
+
+        const tasksWithPrereqs = validTasks.map((task, idx) => {
+          const origIdx = Array.from(originalIndexToValidIndex.entries())
+            .find(([, vIdx]) => vIdx === idx)?.[0]
+          const origPrereqs = task.prerequisiteIndexes || []
+          const validPrereqs = origPrereqs
+            .filter(origPrereqIdx => originalIndexToValidIndex.has(origPrereqIdx))
+            .map(origPrereqIdx => originalIndexToValidIndex.get(origPrereqIdx)!)
+          return {
+            content: task.content.trim(),
+            department: task.department,
+            deadline: task.deadline,
+            prerequisiteIndexes: validPrereqs,
+          }
+        })
+
         return {
           meeting: {
             title: meeting.title.trim(),
             departments: meeting.departments.trim(),
             meetingDate: meeting.meetingDate,
-            tasks: validTasks.map((t) => ({
-              content: t.content.trim(),
-              department: t.department,
-              deadline: t.deadline,
-            })),
+            tasks: tasksWithPrereqs,
           },
           decision: {
             action: decision.action,
@@ -878,6 +926,33 @@ export default function MeetingImportPreview() {
                                 />
                               </div>
                             </div>
+
+                            {tIndex > 0 && (
+                              <div className="pt-2 border-t border-slate-200">
+                                <label className="block text-[11px] text-slate-500 mb-1 flex items-center gap-1">
+                                  <Link2 className="w-3 h-3" />
+                                  前置事项
+                                </label>
+                                <div className="max-h-24 overflow-y-auto border border-slate-200 rounded-lg p-1.5 space-y-0.5 bg-white">
+                                  {meeting.tasks.slice(0, tIndex).map((_, prereqIndex) => (
+                                    <label
+                                      key={prereqIndex}
+                                      className="flex items-center gap-2 p-1 rounded hover:bg-slate-50 cursor-pointer transition-colors"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={(task.prerequisiteIndexes || []).includes(prereqIndex)}
+                                        onChange={() => togglePrerequisite(mIndex, tIndex, prereqIndex)}
+                                        className="w-3 h-3 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                                      />
+                                      <span className="text-[11px] text-slate-600 truncate">
+                                        事项 {prereqIndex + 1}：{meeting.tasks[prereqIndex].content || '(未填写)'}
+                                      </span>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
                       ))}
