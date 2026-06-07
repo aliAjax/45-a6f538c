@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express'
-import db from '../db.js'
+import db, { createAuditLog } from '../db.js'
 import type {
   Meeting,
   Task,
@@ -295,7 +295,7 @@ router.get('/:id', (req: Request, res: Response) => {
 
 router.post('/', (req: Request, res: Response) => {
   try {
-    const { title, departments, meetingDate, tasks } = req.body as CreateMeetingRequest
+    const { title, departments, meetingDate, tasks, sourcePage } = req.body as CreateMeetingRequest & { sourcePage?: string }
 
     if (!title || !departments || !meetingDate || !tasks || tasks.length === 0) {
       return res.status(400).json({ success: false, error: '请填写完整信息' })
@@ -325,12 +325,38 @@ router.post('/', (req: Request, res: Response) => {
       const meetingResult = insertMeeting.run(title, departments, meetingDate)
       const meetingId = meetingResult.lastInsertRowid as number
 
+      createAuditLog({
+        entityType: 'meeting',
+        entityId: meetingId,
+        actionType: 'create',
+        fieldName: null,
+        oldValue: null,
+        newValue: { title, departments, meetingDate, taskCount: tasks.length },
+        sourcePage: sourcePage || null,
+        taskId: null,
+        meetingId: meetingId,
+        department: null,
+      })
+
       const taskIds: number[] = []
       tasks.forEach(task => {
         const taskResult = insertTask.run(meetingId, task.content, task.department, task.deadline)
         const taskId = taskResult.lastInsertRowid as number
         insertTaskProgress.run(taskId)
         taskIds.push(taskId)
+
+        createAuditLog({
+          entityType: 'task',
+          entityId: taskId,
+          actionType: 'create',
+          fieldName: null,
+          oldValue: null,
+          newValue: { content: task.content, department: task.department, deadline: task.deadline, status: 'pending' },
+          sourcePage: sourcePage || null,
+          taskId: taskId,
+          meetingId: meetingId,
+          department: task.department,
+        })
       })
 
       tasks.forEach((task, index) => {

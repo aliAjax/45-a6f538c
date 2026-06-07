@@ -40,6 +40,7 @@ import type {
   CreateTaskViewRequest,
   UpdateTaskViewRequest,
   TaskViewValidationResult,
+  AuditLog,
 } from '../../shared/types'
 import api from '../utils/api'
 
@@ -100,7 +101,7 @@ interface AppState {
   fetchTaskProgress: (taskId: number) => Promise<TaskProgress[]>
   fetchTaskSupervisions: (taskId: number) => Promise<TaskSupervision[]>
   createSupervision: (data: CreateSupervisionRequest) => Promise<TaskSupervision>
-  closeSupervision: (id: number) => Promise<TaskSupervision>
+  closeSupervision: (id: number, sourcePage?: string) => Promise<TaskSupervision>
   fetchSupervisionFollowUps: (supervisionId: number) => Promise<SupervisionFollowUp[]>
   addSupervisionFollowUp: (supervisionId: number, data: CreateSupervisionFollowUpRequest) => Promise<SupervisionFollowUp>
   fetchSupervisingTasks: () => Promise<void>
@@ -127,6 +128,9 @@ interface AppState {
   reorderTaskViews: (orders: Array<{ id: number; sortOrder: number }>) => Promise<void>
   validateTaskView: (id: number) => Promise<TaskViewValidationResult>
   setCurrentViewId: (id: number | null) => void
+  fetchTaskAuditLogs: (taskId: number) => Promise<AuditLog[]>
+  fetchMeetingAuditLogs: (meetingId: number) => Promise<AuditLog[]>
+  fetchDepartmentAuditLogs: (department: string, limit?: number, offset?: number) => Promise<{ list: AuditLog[]; total: number; limit: number; offset: number }>
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -535,10 +539,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  closeSupervision: async (id: number) => {
+  closeSupervision: async (id: number, sourcePage?: string) => {
     set({ loading: true, error: null })
     try {
-      const supervision = await api.patch<TaskSupervision>(`/supervisions/${id}/close`, {})
+      const supervision = await api.patch<TaskSupervision>(`/supervisions/${id}/close`, { sourcePage })
       set({ loading: false })
       const { fetchSupervisingTasks } = get()
       fetchSupervisingTasks()
@@ -878,5 +882,37 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setCurrentViewId: (id) => {
     set({ currentViewId: id })
+  },
+
+  fetchTaskAuditLogs: async (taskId) => {
+    try {
+      const res = await api.get<AuditLog[]>(`/audit-logs/task/${taskId}`)
+      return res
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+  },
+
+  fetchMeetingAuditLogs: async (meetingId) => {
+    try {
+      const res = await api.get<AuditLog[]>(`/audit-logs/meeting/${meetingId}`)
+      return res
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+  },
+
+  fetchDepartmentAuditLogs: async (department, limit = 50, offset = 0) => {
+    try {
+      const res = await api.get<{ list: AuditLog[]; total: number; limit: number; offset: number }>(
+        `/audit-logs/department/${encodeURIComponent(department)}?limit=${limit}&offset=${offset}`
+      )
+      return res
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
   },
 }))

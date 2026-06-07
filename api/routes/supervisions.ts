@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express'
-import db from '../db.js'
+import db, { createAuditLog } from '../db.js'
 import type {
   TaskSupervision,
   CreateSupervisionRequest,
@@ -202,7 +202,7 @@ router.get('/:id/follow-ups', (req: Request, res: Response) => {
 
 router.post('/', (req: Request, res: Response) => {
   try {
-    const { taskId, note, nextFollowUpDate } = req.body as CreateSupervisionRequest
+    const { taskId, note, nextFollowUpDate, sourcePage } = req.body as CreateSupervisionRequest & { sourcePage?: string }
 
     if (!taskId) {
       return res.status(400).json({ success: false, error: '事项ID不能为空' })
@@ -212,7 +212,12 @@ router.post('/', (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '督办说明不能为空' })
     }
 
-    const taskRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as { id: number; status: string } | undefined
+    const taskRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as {
+      id: number
+      status: string
+      meeting_id: number
+      department: string
+    } | undefined
     if (!taskRow) {
       return res.status(404).json({ success: false, error: '事项不存在' })
     }
@@ -243,6 +248,19 @@ router.post('/', (req: Request, res: Response) => {
         INSERT INTO supervision_follow_ups (supervision_id, content, next_follow_up_date, created_at)
         VALUES (?, ?, ?, datetime('now', 'localtime'))
       `).run(newSupervisionId, note.trim(), nextFollowUpDate || null)
+
+      createAuditLog({
+        entityType: 'supervision',
+        entityId: newSupervisionId,
+        actionType: 'start_supervision',
+        fieldName: null,
+        oldValue: null,
+        newValue: { note: note.trim(), nextFollowUpDate: nextFollowUpDate || null },
+        sourcePage: sourcePage || null,
+        taskId: Number(taskId),
+        meetingId: taskRow.meeting_id,
+        department: taskRow.department,
+      })
 
       return newSupervisionId
     })()
@@ -310,6 +328,7 @@ router.post('/:id/follow-ups', (req: Request, res: Response) => {
 router.patch('/:id/close', (req: Request, res: Response) => {
   try {
     const { id } = req.params
+    const { sourcePage } = req.body as { sourcePage?: string }
 
     const supervisionRow = db.prepare('SELECT * FROM task_supervisions WHERE id = ?').get(id) as SupervisionRow | undefined
     if (!supervisionRow) {
@@ -320,13 +339,33 @@ router.patch('/:id/close', (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '该督办已关闭' })
     }
 
-    db.prepare(`
-      UPDATE task_supervisions
-      SET status = 'closed',
-          closed_at = datetime('now', 'localtime'),
-          updated_at = datetime('now', 'localtime')
-      WHERE id = ?
-    `).run(id)
+    const taskRow = db.prepare('SELECT meeting_id, department FROM tasks WHERE id = ?').get(supervisionRow.task_id) as {
+      meeting_id: number
+      department: string
+    } | undefined
+
+    db.transaction(() => {
+      db.prepare(`
+        UPDATE task_supervisions
+        SET status = 'closed',
+            closed_at = datetime('now', 'localtime'),
+            updated_at = datetime('now', 'localtime')
+        WHERE id = ?
+      `).run(id)
+
+      createAuditLog({
+        entityType: 'supervision',
+        entityId: Number(id),
+        actionType: 'close_supervision',
+        fieldName: 'status',
+        oldValue: 'active',
+        newValue: 'closed',
+        sourcePage: sourcePage || null,
+        taskId: supervisionRow.task_id,
+        meetingId: taskRow?.meeting_id || null,
+        department: taskRow?.department || null,
+      })
+    })()
 
     const updatedRow = db.prepare(`
       SELECT * FROM task_supervisions WHERE id = ?

@@ -172,6 +172,27 @@ function initDatabase() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_task_views_sort_order ON task_views(sort_order);
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      entity_type TEXT NOT NULL,
+      entity_id INTEGER NOT NULL,
+      action_type TEXT NOT NULL,
+      field_name TEXT,
+      old_value TEXT,
+      new_value TEXT,
+      source_page TEXT,
+      task_id INTEGER,
+      meeting_id INTEGER,
+      department TEXT,
+      created_at TEXT DEFAULT (datetime('now', 'localtime'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_task_id ON audit_logs(task_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_meeting_id ON audit_logs(meeting_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_department ON audit_logs(department);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
   `)
 
   const meetingCount = db.prepare('SELECT COUNT(*) as count FROM meetings').get() as { count: number }
@@ -324,6 +345,7 @@ function initDatabase() {
   migrateSupervisionFollowUps()
   migrateTemplateVersions()
   migrateTaskViewsTargetPage()
+  migrateAuditLogsFromProgress()
 }
 
 function migrateTaskViewsTargetPage() {
@@ -469,6 +491,120 @@ function migrateSupervisionFollowUps() {
 
     transaction(supervisionsWithoutFollowUps)
   }
+}
+
+function migrateAuditLogsFromProgress() {
+  const auditCount = db.prepare('SELECT COUNT(*) as count FROM audit_logs').get() as { count: number }
+  if (auditCount.count > 0) {
+    return
+  }
+
+  const progressRows = db.prepare(`
+    SELECT tp.*, t.department, t.meeting_id
+    FROM task_progress tp
+    INNER JOIN tasks t ON tp.task_id = t.id
+    ORDER BY tp.created_at ASC, tp.id ASC
+  `).all() as Array<{
+    id: number
+    task_id: number
+    status: string
+    progress: string | null
+    created_at: string
+    department: string
+    meeting_id: number
+  }>
+
+  if (progressRows.length === 0) {
+    return
+  }
+
+  const insertAudit = db.prepare(`
+    INSERT INTO audit_logs (
+      entity_type, entity_id, action_type, field_name,
+      old_value, new_value, source_page, task_id, meeting_id, department, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  const taskPrevState = new Map<number, { status: string; progress: string }>()
+
+  const transaction = db.transaction((rows: typeof progressRows) => {
+    for (const row of rows) {
+      const prev = taskPrevState.get(row.task_id)
+      const newStatus = row.status
+      const newProgress = row.progress || ''
+
+      if (!prev) {
+        insertAudit.run(
+          'task', row.task_id, 'create', null,
+          null, JSON.stringify({ status: newStatus, progress: newProgress }),
+          '历史数据迁移', row.task_id, row.meeting_id, row.department, row.created_at
+        )
+      } else {
+        if (prev.status !== newStatus) {
+          insertAudit.run(
+            'task', row.task_id, 'update', 'status',
+            prev.status, newStatus,
+            '历史数据迁移', row.task_id, row.meeting_id, row.department, row.created_at
+          )
+        }
+        if (prev.progress !== newProgress) {
+          insertAudit.run(
+            'task', row.task_id, 'update', 'progress',
+            prev.progress, newProgress,
+            '历史数据迁移', row.task_id, row.meeting_id, row.department, row.created_at
+          )
+        }
+      }
+
+      taskPrevState.set(row.task_id, { status: newStatus, progress: newProgress })
+    }
+  })
+
+  transaction(progressRows)
+}
+
+export function createAuditLog(params: {
+  entityType: string
+  entityId: number
+  actionType: string
+  fieldName?: string | null
+  oldValue?: unknown
+  newValue?: unknown
+  sourcePage?: string | null
+  taskId?: number | null
+  meetingId?: number | null
+  department?: string | null
+  createdAt?: string | null
+}) {
+  const stmt = db.prepare(`
+    INSERT INTO audit_logs (
+      entity_type, entity_id, action_type, field_name,
+      old_value, new_value, source_page, task_id, meeting_id, department, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  const oldVal = params.oldValue !== undefined && params.oldValue !== null
+    ? (typeof params.oldValue === 'string' ? params.oldValue : JSON.stringify(params.oldValue))
+    : null
+  const newVal = params.newValue !== undefined && params.newValue !== null
+    ? (typeof params.newValue === 'string' ? params.newValue : JSON.stringify(params.newValue))
+    : null
+
+  const result = stmt.run(
+    params.entityType,
+    params.entityId,
+    params.actionType,
+    params.fieldName || null,
+    oldVal,
+    newVal,
+    params.sourcePage || null,
+    params.taskId || null,
+    params.meetingId || null,
+    params.department || null,
+    params.createdAt || null
+  )
+
+  return Number(result.lastInsertRowid)
 }
 
 initDatabase()

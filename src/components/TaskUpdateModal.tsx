@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { X, CheckCircle, Clock, AlertCircle, BellRing, Plus, XCircle, CalendarDays, MessageSquare, Link2, Lock } from 'lucide-react'
+import { X, CheckCircle, Clock, AlertCircle, BellRing, Plus, XCircle, CalendarDays, MessageSquare, Link2, Lock, History } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
-import type { Task, TaskProgress, TaskSupervision, SupervisionFollowUp, UpdateTaskRequest } from '../../shared/types'
+import type { Task, TaskProgress, TaskSupervision, SupervisionFollowUp, UpdateTaskRequest, AuditLog } from '../../shared/types'
 import { cn } from '../lib/utils'
 import ProgressTimeline from './ProgressTimeline'
+import AuditLogTimeline from './AuditLogTimeline'
 import StatusBadge from './StatusBadge'
 
 interface TaskUpdateModalProps {
@@ -35,13 +36,16 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated, allT
   const [superviseNote, setSuperviseNote] = useState('')
   const [nextFollowUpDate, setNextFollowUpDate] = useState('')
   const [submittingSupervision, setSubmittingSupervision] = useState(false)
-  const [activeTab, setActiveTab] = useState<'progress' | 'supervision'>('progress')
+  const [activeTab, setActiveTab] = useState<'progress' | 'supervision' | 'audit'>('audit')
   const [showFollowUpForm, setShowFollowUpForm] = useState(false)
   const [followUpContent, setFollowUpContent] = useState('')
   const [followUpNextDate, setFollowUpNextDate] = useState('')
   const [submittingFollowUp, setSubmittingFollowUp] = useState(false)
   const [followUpList, setFollowUpList] = useState<SupervisionFollowUp[]>([])
   const [loadingFollowUps, setLoadingFollowUps] = useState(false)
+  const [auditLogList, setAuditLogList] = useState<AuditLog[]>([])
+  const [loadingAuditLogs, setLoadingAuditLogs] = useState(false)
+  const fetchTaskAuditLogs = useAppStore((state) => state.fetchTaskAuditLogs)
 
   const loadProgressList = useCallback(async (taskId: number) => {
     setLoadingProgress(true)
@@ -85,6 +89,18 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated, allT
     }
   }, [fetchTaskSupervisions, loadFollowUpList])
 
+  const loadAuditLogList = useCallback(async (taskId: number) => {
+    setLoadingAuditLogs(true)
+    try {
+      const list = await fetchTaskAuditLogs(taskId)
+      setAuditLogList(list)
+    } catch (err) {
+      console.error('Failed to load audit log list:', err)
+    } finally {
+      setLoadingAuditLogs(false)
+    }
+  }, [fetchTaskAuditLogs])
+
   useEffect(() => {
     if (task) {
       setProgress(task.progress || '')
@@ -99,8 +115,9 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated, allT
       setFollowUpNextDate('')
       loadProgressList(task.id)
       loadSupervisionList(task.id)
+      loadAuditLogList(task.id)
     }
-  }, [task, loadProgressList, loadSupervisionList])
+  }, [task, loadProgressList, loadSupervisionList, loadAuditLogList])
 
   if (!isOpen || !task) return null
 
@@ -110,13 +127,14 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated, allT
     setError('')
 
     try {
-      const updateData: UpdateTaskRequest = { status, progress }
+      const updateData: UpdateTaskRequest = { status, progress, sourcePage: '任务详情弹窗' }
       if (allTasks.length > 0) {
         updateData.prerequisiteTaskIds = prerequisiteTaskIds
       }
       await updateTask(task.id, updateData)
       await loadProgressList(task.id)
       await loadSupervisionList(task.id)
+      await loadAuditLogList(task.id)
       onClose()
       onUpdated?.()
     } catch (err) {
@@ -139,11 +157,13 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated, allT
         taskId: task.id,
         note: superviseNote.trim(),
         nextFollowUpDate: nextFollowUpDate || undefined,
+        sourcePage: '任务详情弹窗',
       })
       setSuperviseNote('')
       setNextFollowUpDate('')
       setShowSuperviseForm(false)
       await loadSupervisionList(task.id)
+      await loadAuditLogList(task.id)
       onUpdated?.()
     } catch (err) {
       const error = err as Error
@@ -157,8 +177,9 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated, allT
     if (!confirm('确定要关闭这条督办吗？')) return
 
     try {
-      await closeSupervision(supervisionId)
+      await closeSupervision(supervisionId, '任务详情弹窗')
       await loadSupervisionList(task.id)
+      await loadAuditLogList(task.id)
       onUpdated?.()
     } catch (err) {
       const error = err as Error
@@ -460,6 +481,20 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated, allT
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    onClick={() => setActiveTab('audit')}
+                    className={cn(
+                      'text-sm font-medium transition-colors flex items-center gap-1',
+                      activeTab === 'audit'
+                        ? 'text-slate-800'
+                        : 'text-slate-500 hover:text-slate-700'
+                    )}
+                  >
+                    <History className="w-3.5 h-3.5" />
+                    变更记录
+                  </button>
+                  <span className="text-slate-300">|</span>
+                  <button
+                    type="button"
                     onClick={() => setActiveTab('progress')}
                     className={cn(
                       'text-sm font-medium transition-colors',
@@ -487,7 +522,17 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated, allT
                 </div>
               </div>
 
-              {activeTab === 'progress' ? (
+              {activeTab === 'audit' ? (
+                loadingAuditLogs ? (
+                  <div className="py-6 text-center text-sm text-slate-500">
+                    加载中...
+                  </div>
+                ) : (
+                  <div className="max-h-48 overflow-y-auto pr-1">
+                    <AuditLogTimeline auditLogs={auditLogList} />
+                  </div>
+                )
+              ) : activeTab === 'progress' ? (
                 loadingProgress ? (
                   <div className="py-6 text-center text-sm text-slate-500">
                     加载中...

@@ -231,6 +231,7 @@ export default function MeetingNew() {
         departments: meetingDepartments.trim(),
         meetingDate,
         tasks: tasksWithPrereqs,
+        sourcePage: '新建会议',
       })
       navigate(`/meetings/${meeting.id}`)
     } catch (err) {

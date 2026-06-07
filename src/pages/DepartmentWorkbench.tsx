@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import {
   Building2,
   ChevronDown,
@@ -14,16 +14,18 @@ import {
   Clock3,
   Activity,
   Lock,
+  History,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import StatusBadge from '../components/StatusBadge'
 import BatchUpdateModal, { type BatchUpdateFormData } from '../components/BatchUpdateModal'
-import type { Task, BatchUpdateTaskResult, RiskLevel, DepartmentRiskDetail } from '../../shared/types'
+import AuditLogTimeline from '../components/AuditLogTimeline'
+import type { Task, BatchUpdateTaskResult, RiskLevel, DepartmentRiskDetail, AuditLog } from '../../shared/types'
 import { cn } from '../lib/utils'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { ApiError } from '../utils/api'
 
-type QueueType = 'pending' | 'overdue' | 'dueThisWeek' | 'completed' | 'risk'
+type QueueType = 'pending' | 'overdue' | 'dueThisWeek' | 'completed' | 'risk' | 'audit'
 
 const queueConfig: Record<QueueType, {
   label: string
@@ -67,6 +69,13 @@ const queueConfig: Record<QueueType, {
     bgClass: 'bg-rose-50',
     borderClass: 'border-rose-200',
   },
+  audit: {
+    label: '变更记录',
+    icon: History,
+    colorClass: 'text-slate-600',
+    bgClass: 'bg-slate-50',
+    borderClass: 'border-slate-200',
+  },
 }
 
 export default function DepartmentWorkbench() {
@@ -82,6 +91,7 @@ export default function DepartmentWorkbench() {
     fetchDepartmentWorkbench,
     fetchDepartmentRiskDetail,
     batchUpdateTasks,
+    fetchDepartmentAuditLogs,
   } = useAppStore()
 
   const urlDepartment = searchParams.get('department') || ''
@@ -95,11 +105,34 @@ export default function DepartmentWorkbench() {
   const [batchResults, setBatchResults] = useState<BatchUpdateTaskResult[] | null>(null)
   const [batchError, setBatchError] = useState<string | null>(null)
   const [activeQueue, setActiveQueue] = useState<QueueType>(
-    urlTab === 'risk' ? 'risk' : urlTab === 'overdue' ? 'overdue' : urlTab === 'dueThisWeek' ? 'dueThisWeek' : urlTab === 'completed' ? 'completed' : 'pending'
+    urlTab === 'risk' ? 'risk' : urlTab === 'overdue' ? 'overdue' : urlTab === 'dueThisWeek' ? 'dueThisWeek' : urlTab === 'completed' ? 'completed' : urlTab === 'audit' ? 'audit' : 'pending'
   )
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([])
+  const [auditLogsTotal, setAuditLogsTotal] = useState(0)
+  const [auditLogsLoading, setAuditLogsLoading] = useState(false)
+  const [auditLogsOffset, setAuditLogsOffset] = useState(0)
+  const auditLogsLimit = 50
 
   const isDeptActive = (dept: string) => departments.includes(dept)
   const dropdownDepartments = allTaskDepartments.length > 0 ? allTaskDepartments : departments
+
+  const loadAuditLogs = useCallback(async (department: string, offset = 0) => {
+    setAuditLogsLoading(true)
+    try {
+      const result = await fetchDepartmentAuditLogs(department, auditLogsLimit, offset)
+      if (offset === 0) {
+        setAuditLogs(result.list)
+      } else {
+        setAuditLogs(prev => [...prev, ...result.list])
+      }
+      setAuditLogsTotal(result.total)
+      setAuditLogsOffset(offset)
+    } catch (err) {
+      console.error('Failed to load audit logs:', err)
+    } finally {
+      setAuditLogsLoading(false)
+    }
+  }, [fetchDepartmentAuditLogs, auditLogsLimit])
 
   useEffect(() => {
     fetchDepartments()
@@ -117,8 +150,14 @@ export default function DepartmentWorkbench() {
       fetchDepartmentWorkbench(selectedDepartment)
       fetchDepartmentRiskDetail(selectedDepartment)
       setSelectedTaskIds(new Set())
+      setAuditLogs([])
+      setAuditLogsTotal(0)
+      setAuditLogsOffset(0)
+      if (activeQueue === 'audit') {
+        loadAuditLogs(selectedDepartment, 0)
+      }
     }
-  }, [selectedDepartment, fetchDepartmentWorkbench, fetchDepartmentRiskDetail])
+  }, [selectedDepartment, fetchDepartmentWorkbench, fetchDepartmentRiskDetail, activeQueue, loadAuditLogs])
 
   useEffect(() => {
     if (urlDepartment !== selectedDepartment && dropdownDepartments.includes(urlDepartment)) {
@@ -127,12 +166,18 @@ export default function DepartmentWorkbench() {
   }, [urlDepartment, selectedDepartment, dropdownDepartments])
 
   useEffect(() => {
-    const validTabs: QueueType[] = ['pending', 'overdue', 'dueThisWeek', 'completed', 'risk']
+    const validTabs: QueueType[] = ['pending', 'overdue', 'dueThisWeek', 'completed', 'risk', 'audit']
     const tab = urlTab as QueueType
     if (validTabs.includes(tab) && tab !== activeQueue) {
       setActiveQueue(tab)
     }
   }, [urlTab, activeQueue])
+
+  useEffect(() => {
+    if (activeQueue === 'audit' && selectedDepartment && auditLogs.length === 0 && !auditLogsLoading) {
+      loadAuditLogs(selectedDepartment, 0)
+    }
+  }, [activeQueue, selectedDepartment, auditLogs.length, auditLogsLoading, loadAuditLogs])
 
   const handleQueueChange = (queue: QueueType) => {
     setActiveQueue(queue)
@@ -223,7 +268,7 @@ export default function DepartmentWorkbench() {
         ...data,
       }))
 
-      const result = await batchUpdateTasks({ updates })
+      const result = await batchUpdateTasks({ updates, sourcePage: '科室工作台' })
       setBatchResults(result.results)
 
       if (result.failCount === 0) {
@@ -233,6 +278,9 @@ export default function DepartmentWorkbench() {
           if (selectedDepartment) {
             fetchDepartmentWorkbench(selectedDepartment)
             fetchDepartmentRiskDetail(selectedDepartment)
+            if (activeQueue === 'audit') {
+              loadAuditLogs(selectedDepartment, 0)
+            }
           }
         }, 1500)
       }
@@ -426,6 +474,62 @@ export default function DepartmentWorkbench() {
           onTaskClick={handleTaskClick}
           department={selectedDepartment}
         />
+      ) : activeQueue === 'audit' ? (
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center">
+                <History className="w-5 h-5 text-slate-600" />
+              </div>
+              <div>
+                <h2 className="font-semibold text-slate-800">变更记录</h2>
+                <p className="text-xs text-slate-500">
+                  共 {auditLogsTotal} 条记录
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5 max-h-[600px] overflow-y-auto">
+            {auditLogsLoading && auditLogs.length === 0 ? (
+              <div className="py-16 text-center">
+                <div className="w-16 h-16 rounded-full bg-slate-50 flex items-center justify-center mx-auto mb-3">
+                  <RefreshCw className="w-8 h-8 text-slate-300 animate-spin" />
+                </div>
+                <p className="text-slate-500 text-sm">加载中...</p>
+              </div>
+            ) : auditLogs.length === 0 ? (
+              <div className="py-16 text-center">
+                <div className="w-16 h-16 rounded-full bg-slate-50 flex items-center justify-center mx-auto mb-3">
+                  <History className="w-8 h-8 text-slate-300" />
+                </div>
+                <p className="text-slate-500 text-sm">暂无变更记录</p>
+              </div>
+            ) : (
+              <>
+                <AuditLogTimeline auditLogs={auditLogs} />
+                {auditLogs.length < auditLogsTotal && !auditLogsLoading && (
+                  <div className="mt-4 text-center">
+                    <button
+                      onClick={() => loadAuditLogs(selectedDepartment, auditLogsOffset + auditLogsLimit)}
+                      className="px-4 py-2 text-sm text-slate-600 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors"
+                    >
+                      加载更多
+                    </button>
+                  </div>
+                )}
+                {auditLogsLoading && auditLogs.length > 0 && (
+                  <div className="mt-4 text-center">
+                    <div className="inline-flex items-center gap-2 text-sm text-slate-500">
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      加载中...
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">

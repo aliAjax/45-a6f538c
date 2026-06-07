@@ -20,18 +20,22 @@ import { useAppStore } from '../store/useAppStore'
 import StatusBadge from '../components/StatusBadge'
 import TaskUpdateModal from '../components/TaskUpdateModal'
 import ProgressTimeline from '../components/ProgressTimeline'
+import AuditLogTimeline from '../components/AuditLogTimeline'
 import { cn } from '../lib/utils'
-import type { Meeting, Task, TaskProgress } from '../../shared/types'
+import type { Meeting, Task, TaskProgress, AuditLog } from '../../shared/types'
 
 export default function MeetingDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { fetchMeetingDetail } = useAppStore()
+  const { fetchMeetingDetail, fetchMeetingAuditLogs } = useAppStore()
 
   const [meeting, setMeeting] = useState<Meeting | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
+  const [showAuditLogs, setShowAuditLogs] = useState(false)
+  const [auditLogList, setAuditLogList] = useState<AuditLog[]>([])
+  const [loadingAuditLogs, setLoadingAuditLogs] = useState(false)
 
   const loadMeeting = useCallback(async () => {
     if (!id) return
@@ -52,6 +56,29 @@ export default function MeetingDetail() {
 
   const handleUpdated = () => {
     loadMeeting()
+    if (showAuditLogs) {
+      loadAuditLogs()
+    }
+  }
+
+  const loadAuditLogs = useCallback(async () => {
+    if (!id) return
+    setLoadingAuditLogs(true)
+    try {
+      const list = await fetchMeetingAuditLogs(Number(id))
+      setAuditLogList(list)
+    } catch (err) {
+      console.error('Failed to load audit logs:', err)
+    } finally {
+      setLoadingAuditLogs(false)
+    }
+  }, [id, fetchMeetingAuditLogs])
+
+  const toggleAuditLogs = async () => {
+    if (!showAuditLogs) {
+      await loadAuditLogs()
+    }
+    setShowAuditLogs(!showAuditLogs)
   }
 
   if (loading) {
@@ -153,6 +180,35 @@ export default function MeetingDetail() {
                 {completedCount} / {tasks.length} 项已完成
               </p>
             </div>
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <button
+              onClick={toggleAuditLogs}
+              className="flex items-center gap-2 text-sm text-slate-600 hover:text-slate-800 transition-colors"
+            >
+              <History className="w-4 h-4" />
+              <span>变更记录</span>
+              {showAuditLogs ? (
+                <ChevronUp className="w-4 h-4" />
+              ) : (
+                <ChevronDown className="w-4 h-4" />
+              )}
+            </button>
+
+            {showAuditLogs && (
+              <div className="mt-4">
+                {loadingAuditLogs ? (
+                  <div className="py-6 text-center text-sm text-slate-500">
+                    加载中...
+                  </div>
+                ) : (
+                  <div className="max-h-80 overflow-y-auto pr-1">
+                    <AuditLogTimeline auditLogs={auditLogList} />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

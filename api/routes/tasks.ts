@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express'
-import db from '../db.js'
+import db, { createAuditLog } from '../db.js'
 import type {
   Task,
   TaskProgress,
@@ -532,7 +532,7 @@ router.get('/calendar', (req: Request, res: Response) => {
 router.patch('/:id', (req: Request, res: Response) => {
   try {
     const { id } = req.params
-    const { status, progress, prerequisiteTaskIds } = req.body as UpdateTaskRequest
+    const { status, progress, prerequisiteTaskIds, sourcePage } = req.body as UpdateTaskRequest & { sourcePage?: string }
 
     const taskRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as TaskRowWithTitle | undefined
     if (!taskRow) {
@@ -570,6 +570,16 @@ router.patch('/:id', (req: Request, res: Response) => {
       values.push(progress)
     }
 
+    if (req.body.department !== undefined) {
+      fields.push('department = ?')
+      values.push(req.body.department)
+    }
+
+    if (req.body.deadline !== undefined) {
+      fields.push('deadline = ?')
+      values.push(req.body.deadline)
+    }
+
     const hasFieldUpdates = fields.length > 0
 
     if (hasFieldUpdates) {
@@ -579,6 +589,8 @@ router.patch('/:id', (req: Request, res: Response) => {
 
     const newStatus = status !== undefined ? status : taskRow.status
     const newProgress = progress !== undefined ? progress : taskRow.progress || ''
+    const newDepartment = req.body.department !== undefined ? req.body.department : taskRow.department
+    const newDeadline = req.body.deadline !== undefined ? req.body.deadline : taskRow.deadline
 
     db.transaction(() => {
       if (hasFieldUpdates) {
@@ -594,6 +606,66 @@ router.patch('/:id', (req: Request, res: Response) => {
           VALUES (?, ?, ?)
         `)
         insertProgress.run(Number(id), newStatus, newProgress)
+
+        if (status !== undefined && taskRow.status !== status) {
+          createAuditLog({
+            entityType: 'task',
+            entityId: Number(id),
+            actionType: 'update',
+            fieldName: 'status',
+            oldValue: taskRow.status,
+            newValue: status,
+            sourcePage: sourcePage || null,
+            taskId: Number(id),
+            meetingId: taskRow.meeting_id,
+            department: taskRow.department,
+          })
+        }
+
+        if (progress !== undefined && taskRow.progress !== progress) {
+          createAuditLog({
+            entityType: 'task',
+            entityId: Number(id),
+            actionType: 'update',
+            fieldName: 'progress',
+            oldValue: taskRow.progress || '',
+            newValue: progress,
+            sourcePage: sourcePage || null,
+            taskId: Number(id),
+            meetingId: taskRow.meeting_id,
+            department: taskRow.department,
+          })
+        }
+
+        if (req.body.department !== undefined && taskRow.department !== req.body.department) {
+          createAuditLog({
+            entityType: 'task',
+            entityId: Number(id),
+            actionType: 'update',
+            fieldName: 'department',
+            oldValue: taskRow.department,
+            newValue: req.body.department,
+            sourcePage: sourcePage || null,
+            taskId: Number(id),
+            meetingId: taskRow.meeting_id,
+            department: req.body.department,
+          })
+        }
+
+        if (req.body.deadline !== undefined && taskRow.deadline !== req.body.deadline) {
+          createAuditLog({
+            entityType: 'task',
+            entityId: Number(id),
+            actionType: 'update',
+            fieldName: 'deadline',
+            oldValue: taskRow.deadline,
+            newValue: req.body.deadline,
+            sourcePage: sourcePage || null,
+            taskId: Number(id),
+            meetingId: taskRow.meeting_id,
+            department: taskRow.department,
+          })
+        }
 
         if (newStatus === 'completed') {
           db.prepare(`
@@ -677,7 +749,7 @@ router.get('/:id/progress', (req: Request, res: Response) => {
 
 router.patch('/batch/update', (req: Request, res: Response) => {
   try {
-    const { updates } = req.body as BatchUpdateTaskRequest
+    const { updates, sourcePage } = req.body as BatchUpdateTaskRequest & { sourcePage?: string }
 
     if (!updates || !Array.isArray(updates) || updates.length === 0) {
       return res.status(400).json({ success: false, error: '更新列表不能为空' })
@@ -818,6 +890,66 @@ router.patch('/batch/update', (req: Request, res: Response) => {
             VALUES (?, ?, ?)
           `)
           insertProgress.run(Number(update.id), newStatus, newProgress)
+
+          if (update.status !== undefined && taskRow.status !== update.status) {
+            createAuditLog({
+              entityType: 'task',
+              entityId: Number(update.id),
+              actionType: 'batch_update',
+              fieldName: 'status',
+              oldValue: taskRow.status,
+              newValue: update.status,
+              sourcePage: sourcePage || null,
+              taskId: Number(update.id),
+              meetingId: taskRow.meeting_id,
+              department: taskRow.department,
+            })
+          }
+
+          if (update.progress !== undefined && taskRow.progress !== update.progress) {
+            createAuditLog({
+              entityType: 'task',
+              entityId: Number(update.id),
+              actionType: 'batch_update',
+              fieldName: 'progress',
+              oldValue: taskRow.progress || '',
+              newValue: update.progress,
+              sourcePage: sourcePage || null,
+              taskId: Number(update.id),
+              meetingId: taskRow.meeting_id,
+              department: taskRow.department,
+            })
+          }
+
+          if (update.department !== undefined && taskRow.department !== update.department) {
+            createAuditLog({
+              entityType: 'task',
+              entityId: Number(update.id),
+              actionType: 'batch_update',
+              fieldName: 'department',
+              oldValue: taskRow.department,
+              newValue: update.department,
+              sourcePage: sourcePage || null,
+              taskId: Number(update.id),
+              meetingId: taskRow.meeting_id,
+              department: update.department,
+            })
+          }
+
+          if (update.deadline !== undefined && taskRow.deadline !== update.deadline) {
+            createAuditLog({
+              entityType: 'task',
+              entityId: Number(update.id),
+              actionType: 'batch_update',
+              fieldName: 'deadline',
+              oldValue: taskRow.deadline,
+              newValue: update.deadline,
+              sourcePage: sourcePage || null,
+              taskId: Number(update.id),
+              meetingId: taskRow.meeting_id,
+              department: taskRow.department,
+            })
+          }
 
           if (newStatus === 'completed') {
             db.prepare(`

@@ -53,6 +53,7 @@ export interface CreateSupervisionRequest {
   taskId: number
   note: string
   nextFollowUpDate?: string
+  sourcePage?: string
 }
 
 export interface CloseSupervisionRequest {
@@ -90,12 +91,14 @@ export interface CreateMeetingRequest {
     deadline: string
     prerequisiteIndexes?: number[]
   }>
+  sourcePage?: string
 }
 
 export interface UpdateTaskRequest {
   status?: 'pending' | 'in_progress' | 'completed'
   progress?: string
   prerequisiteTaskIds?: number[]
+  sourcePage?: string
 }
 
 export interface MeetingTemplate {
@@ -344,6 +347,7 @@ export interface BatchUpdateTaskItem {
 
 export interface BatchUpdateTaskRequest {
   updates: BatchUpdateTaskItem[]
+  sourcePage?: string
 }
 
 export interface BatchUpdateTaskResult {
@@ -500,4 +504,42 @@ export interface TaskViewValidationResult {
   isValid: boolean
   invalidDepartments: string[]
   message?: string
+}
+
+export type AuditLogActionType =
+  | 'create'
+  | 'update'
+  | 'delete'
+  | 'start_supervision'
+  | 'close_supervision'
+  | 'batch_update'
+
+export type AuditLogEntityType = 'task' | 'meeting' | 'supervision' | 'department'
+
+export interface AuditLog {
+  id: number
+  entityType: AuditLogEntityType
+  entityId: number
+  actionType: AuditLogActionType
+  fieldName: string | null
+  oldValue: string | null
+  newValue: string | null
+  sourcePage: string | null
+  taskId: number | null
+  meetingId: number | null
+  department: string | null
+  createdAt: string
+}
+
+export interface CreateAuditLogRequest {
+  entityType: AuditLogEntityType
+  entityId: number
+  actionType: AuditLogActionType
+  fieldName?: string
+  oldValue?: unknown
+  newValue?: unknown
+  sourcePage?: string
+  taskId?: number
+  meetingId?: number
+  department?: string
 }

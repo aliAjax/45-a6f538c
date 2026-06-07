@@ -18,6 +18,7 @@ import templatesRoutes from './routes/templates.js'
 import remindersRoutes from './routes/reminders.js'
 import supervisionsRoutes from './routes/supervisions.js'
 import viewsRoutes from './routes/views.js'
+import auditLogsRoutes from './routes/audit-logs.js'
 import './db.js'
 
 dotenv.config()
@@ -40,6 +41,7 @@ app.use('/api/templates', templatesRoutes)
 app.use('/api/reminders', remindersRoutes)
 app.use('/api/supervisions', supervisionsRoutes)
 app.use('/api/views', viewsRoutes)
+app.use('/api/audit-logs', auditLogsRoutes)
 
 /**
  * health
