@@ -16,6 +16,7 @@ import statsRoutes from './routes/stats.js'
 import departmentsRoutes from './routes/departments.js'
 import templatesRoutes from './routes/templates.js'
 import remindersRoutes from './routes/reminders.js'
+import reminderRulesRoutes from './routes/reminder-rules.js'
 import supervisionsRoutes from './routes/supervisions.js'
 import viewsRoutes from './routes/views.js'
 import auditLogsRoutes from './routes/audit-logs.js'
@@ -39,6 +40,7 @@ app.use('/api/stats', statsRoutes)
 app.use('/api/departments', departmentsRoutes)
 app.use('/api/templates', templatesRoutes)
 app.use('/api/reminders', remindersRoutes)
+app.use('/api/reminder-rules', reminderRulesRoutes)
 app.use('/api/supervisions', supervisionsRoutes)
 app.use('/api/views', viewsRoutes)
 app.use('/api/audit-logs', auditLogsRoutes)

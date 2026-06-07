@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import db from '../db.js'
+import { getReminderRuleForDepartment } from './reminder-rules.js'
 import type { Task, ReminderGroups, TaskSupervision, SupervisionFollowUp } from '../../shared/types.js'
 
 interface TaskRowWithTitle {
@@ -105,15 +106,37 @@ function rowToTask(row: TaskRowWithTitle): Task {
 
 const router = Router()
 
+function getTaskEffectiveReminderDate(task: Task, rule: {
+  advanceDays: number
+  includeSupervisionFollowUp: boolean
+  repeatOverdue: boolean
+}): string | null {
+  const deadlineStr = task.deadline.split('T')[0].split(' ')[0]
+
+  if (rule.includeSupervisionFollowUp && task.activeSupervision) {
+    const supervisionNextDate = task.activeSupervision.nextFollowUpDate
+      ? task.activeSupervision.nextFollowUpDate.split('T')[0].split(' ')[0]
+      : null
+
+    const followUpNextDate = task.activeSupervision.latestFollowUp?.nextFollowUpDate
+      ? task.activeSupervision.latestFollowUp.nextFollowUpDate.split('T')[0].split(' ')[0]
+      : null
+
+    const effectiveSupervisionDate = followUpNextDate || supervisionNextDate
+
+    if (effectiveSupervisionDate && effectiveSupervisionDate < deadlineStr) {
+      return effectiveSupervisionDate
+    }
+  }
+
+  return deadlineStr
+}
+
 router.get('/', (_req: Request, res: Response) => {
   try {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-
-    const threeDaysLater = new Date(today)
-    threeDaysLater.setDate(threeDaysLater.getDate() + 3)
-    threeDaysLater.setHours(23, 59, 59, 999)
-    const threeDaysLaterStr = threeDaysLater.toISOString().split('T')[0]
+    const todayStr = today.toISOString().split('T')[0]
 
     const allRows = db.prepare(`
       SELECT t.*, m.title as meeting_title,
@@ -124,32 +147,58 @@ router.get('/', (_req: Request, res: Response) => {
       FROM tasks t
       LEFT JOIN meetings m ON t.meeting_id = m.id
       WHERE t.status != 'completed'
-        AND t.deadline <= ?
       ORDER BY t.deadline ASC, t.id DESC
-    `).all(threeDaysLaterStr) as TaskRowWithTitle[]
+    `).all() as TaskRowWithTitle[]
 
     const overdue: Task[] = []
     const todayTasks: Task[] = []
-    const nextThreeDays: Task[] = []
+    const upcoming: Task[] = []
+
+    const seenTaskIds = new Set<number>()
 
     allRows.forEach((row) => {
-      const task = rowToTask(row)
-      const deadlineDate = new Date(row.deadline)
-      deadlineDate.setHours(0, 0, 0, 0)
+      if (seenTaskIds.has(row.id)) return
 
-      if (deadlineDate < today) {
-        overdue.push(task)
-      } else if (deadlineDate.getTime() === today.getTime()) {
+      const task = rowToTask(row)
+      const rule = getReminderRuleForDepartment(task.department)
+      const effectiveDate = getTaskEffectiveReminderDate(task, rule)
+
+      if (!effectiveDate) return
+
+      const date = new Date(effectiveDate)
+      date.setHours(0, 0, 0, 0)
+
+      const isOverdue = date < today
+
+      if (isOverdue) {
+        if (rule.repeatOverdue) {
+          overdue.push(task)
+          seenTaskIds.add(task.id)
+        }
+        return
+      }
+
+      const isToday = date.getTime() === today.getTime()
+
+      if (isToday) {
         todayTasks.push(task)
-      } else {
-        nextThreeDays.push(task)
+        seenTaskIds.add(task.id)
+        return
+      }
+
+      const diffTime = date.getTime() - today.getTime()
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+
+      if (diffDays <= rule.advanceDays) {
+        upcoming.push(task)
+        seenTaskIds.add(task.id)
       }
     })
 
     const groups: ReminderGroups = {
       overdue,
       today: todayTasks,
-      nextThreeDays,
+      upcoming,
     }
 
     res.json({ success: true, data: groups })

@@ -77,7 +77,7 @@ export interface Stats {
   totalMeetings: number
   totalTasks: number
   overdueTasks: number
-  dueThisWeekTasks: number
+  dueSoonTasks: number
   completedTasks: number
 }
 
@@ -237,10 +237,32 @@ export interface CalendarMonthData {
   days: CalendarDayTasks[]
 }
 
+export interface ReminderRule {
+  id: number
+  department: string
+  advanceDays: number
+  includeSupervisionFollowUp: boolean
+  repeatOverdue: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface UpdateReminderRuleRequest {
+  advanceDays?: number
+  includeSupervisionFollowUp?: boolean
+  repeatOverdue?: boolean
+}
+
+export const DEFAULT_REMINDER_RULE: Omit<ReminderRule, 'id' | 'department' | 'createdAt' | 'updatedAt'> = {
+  advanceDays: 3,
+  includeSupervisionFollowUp: false,
+  repeatOverdue: true,
+}
+
 export interface ReminderGroups {
   overdue: Task[]
   today: Task[]
-  nextThreeDays: Task[]
+  upcoming: Task[]
 }
 
 export interface MeetingReviewStats {

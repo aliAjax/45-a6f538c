@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import db, { createAuditLog } from '../db.js'
+import { getReminderRuleForDepartment } from './reminder-rules.js'
 import type {
   Task,
   TaskProgress,
@@ -433,8 +434,9 @@ router.get('/calendar', (req: Request, res: Response) => {
     const startDate = `${y}-${String(m).padStart(2, '0')}-01`
     const endDate = `${y}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`
 
-    const today = new Date().toISOString().split('T')[0]
-    const { start: dueSoonStart, end: dueSoonEnd } = getDueSoonRange()
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const todayStr = today.toISOString().split('T')[0]
 
     let whereClause = `WHERE date(t.deadline) >= date(?) AND date(t.deadline) <= date(?)`
     const params: (string | number)[] = [startDate, endDate]
@@ -469,18 +471,13 @@ router.get('/calendar', (req: Request, res: Response) => {
 
     if (overdueOnly === 'true') {
       whereClause += ' AND t.status != ? AND date(t.deadline) < date(?)'
-      params.push('completed', today)
-    }
-
-    if (dueSoonOnly === 'true') {
-      whereClause += ' AND t.status != ? AND date(t.deadline) >= date(?) AND date(t.deadline) <= date(?)'
-      params.push('completed', dueSoonStart, dueSoonEnd)
+      params.push('completed', todayStr)
     }
 
     if (status && status !== 'all') {
       whereClause += ' AND t.status = ?'
       params.push(status as string)
-    } else if (overdueOnly !== 'true' && dueSoonOnly !== 'true') {
+    } else if (overdueOnly !== 'true') {
       whereClause += ` AND t.status != 'completed'`
     }
 
@@ -496,7 +493,45 @@ router.get('/calendar', (req: Request, res: Response) => {
       ORDER BY t.deadline ASC, t.id DESC
     `).all(...params) as TaskRowWithTitle[]
 
-    const tasks = rows.map(rowToTask)
+    let tasks = rows.map(rowToTask)
+
+    if (dueSoonOnly === 'true') {
+      tasks = tasks.filter((task) => {
+        const rule = getReminderRuleForDepartment(task.department)
+
+        const deadlineStr = task.deadline.split('T')[0].split(' ')[0]
+        let effectiveDateStr = deadlineStr
+
+        if (rule.includeSupervisionFollowUp && task.activeSupervision) {
+          const supervisionNextDate = task.activeSupervision.nextFollowUpDate
+            ? task.activeSupervision.nextFollowUpDate.split('T')[0].split(' ')[0]
+            : null
+
+          const followUpNextDate = task.activeSupervision.latestFollowUp?.nextFollowUpDate
+            ? task.activeSupervision.latestFollowUp.nextFollowUpDate.split('T')[0].split(' ')[0]
+            : null
+
+          const effectiveSupervisionDate = followUpNextDate || supervisionNextDate
+
+          if (effectiveSupervisionDate && effectiveSupervisionDate < deadlineStr) {
+            effectiveDateStr = effectiveSupervisionDate
+          }
+        }
+
+        const effectiveDate = new Date(effectiveDateStr)
+        effectiveDate.setHours(0, 0, 0, 0)
+
+        if (effectiveDate < today) {
+          return rule.repeatOverdue
+        }
+
+        const diffTime = effectiveDate.getTime() - today.getTime()
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+
+        return diffDays <= rule.advanceDays
+      })
+    }
+
     enrichTasksWithDependencies(tasks)
 
     const daysMap = new Map<string, CalendarDayTasks>()

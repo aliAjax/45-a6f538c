@@ -90,20 +90,20 @@ export default function Dashboard() {
   const {
     stats,
     overdueTasks,
-    thisWeekTasks,
     supervisingTasks,
     departmentTaskStats,
     departmentRiskStats,
     departments,
     taskViews,
+    reminderGroups,
     fetchStats,
     fetchOverdueTasks,
-    fetchThisWeekTasks,
     fetchSupervisingTasks,
     fetchDepartmentTaskStats,
     fetchDepartmentRiskStats,
     fetchDepartments,
     fetchTaskViews,
+    fetchReminders,
   } = useAppStore()
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
@@ -112,13 +112,13 @@ export default function Dashboard() {
   useEffect(() => {
     fetchStats()
     fetchOverdueTasks()
-    fetchThisWeekTasks()
     fetchSupervisingTasks()
     fetchDepartmentTaskStats()
     fetchDepartmentRiskStats()
     fetchDepartments()
     fetchTaskViews()
-  }, [fetchStats, fetchOverdueTasks, fetchThisWeekTasks, fetchSupervisingTasks, fetchDepartmentTaskStats, fetchDepartmentRiskStats, fetchDepartments, fetchTaskViews])
+    fetchReminders()
+  }, [fetchStats, fetchOverdueTasks, fetchSupervisingTasks, fetchDepartmentTaskStats, fetchDepartmentRiskStats, fetchDepartments, fetchTaskViews, fetchReminders])
 
   const handleTaskClick = (task: Task) => {
     setSelectedTask(task)
@@ -128,9 +128,11 @@ export default function Dashboard() {
   const handleUpdated = () => {
     fetchStats()
     fetchOverdueTasks()
-    fetchThisWeekTasks()
     fetchSupervisingTasks()
+    fetchReminders()
   }
+
+  const upcomingTasks = reminderGroups?.upcoming || []
 
   return (
     <div className="space-y-6">
@@ -164,8 +166,8 @@ export default function Dashboard() {
           iconBg="bg-white/20"
         />
         <StatCard
-          title="本周到期"
-          value={stats?.dueThisWeekTasks || 0}
+          title="临期任务"
+          value={stats?.dueSoonTasks || 0}
           icon={Clock}
           gradient="bg-gradient-to-br from-amber-500 to-amber-700"
           iconBg="bg-white/20"
@@ -346,9 +348,9 @@ export default function Dashboard() {
                 <Clock className="w-5 h-5 text-amber-600" />
               </div>
               <div>
-                <h2 className="font-semibold text-slate-800">本周到期</h2>
+                <h2 className="font-semibold text-slate-800">临期任务</h2>
                 <p className="text-xs text-slate-500">
-                  共 {thisWeekTasks.length} 项本周内到期
+                  共 {upcomingTasks.length} 项即将到期
                 </p>
               </div>
             </div>
@@ -362,15 +364,15 @@ export default function Dashboard() {
           </div>
 
           <div className="p-4 space-y-3 max-h-96 overflow-y-auto">
-            {thisWeekTasks.length === 0 ? (
+            {upcomingTasks.length === 0 ? (
               <div className="py-12 text-center">
                 <div className="w-16 h-16 rounded-full bg-slate-50 flex items-center justify-center mx-auto mb-3">
                   <Clock className="w-8 h-8 text-slate-400" />
                 </div>
-                <p className="text-slate-500 text-sm">本周没有即将到期的事项</p>
+                <p className="text-slate-500 text-sm">暂无即将到期的事项</p>
               </div>
             ) : (
-              thisWeekTasks.map((task) => (
+              upcomingTasks.map((task) => (
                 <TaskCard
                   key={task.id}
                   task={task}

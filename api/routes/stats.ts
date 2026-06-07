@@ -1,53 +1,101 @@
 import { Router, type Request, type Response } from 'express'
 import db from '../db.js'
-import type { Stats } from '../../shared/types.js'
+import { getReminderRuleForDepartment } from './reminder-rules.js'
+import type { Stats, Task } from '../../shared/types.js'
 
 const router = Router()
 
-function getThisWeekRange(): { start: string; end: string } {
-  const now = new Date()
-  const day = now.getDay()
-  const diff = now.getDate() - day + (day === 0 ? -6 : 1)
-  const monday = new Date(now.setDate(diff))
-  monday.setHours(0, 0, 0, 0)
-  const sunday = new Date(monday)
-  sunday.setDate(sunday.getDate() + 6)
-  sunday.setHours(23, 59, 59, 999)
-  return {
-    start: monday.toISOString().split('T')[0],
-    end: sunday.toISOString().split('T')[0],
-  }
+interface TaskRow {
+  id: number
+  department: string
+  deadline: string
+  status: string
+  has_active_supervision?: number
+  next_follow_up_date?: string | null
+  follow_up_next_date?: string | null
 }
 
 router.get('/', (_req: Request, res: Response) => {
   try {
-    const today = new Date().toISOString().split('T')[0]
-    const { start, end } = getThisWeekRange()
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const todayStr = today.toISOString().split('T')[0]
 
     const meetingsCount = db.prepare('SELECT COUNT(*) as count FROM meetings').get() as { count: number }
     const tasksCount = db.prepare('SELECT COUNT(*) as count FROM tasks').get() as { count: number }
     const completedCount = db.prepare("SELECT COUNT(*) as count FROM tasks WHERE status = 'completed'").get() as { count: number }
 
-    const overdueCount = db.prepare(`
-      SELECT COUNT(*) as count
-      FROM tasks
-      WHERE status != 'completed' AND deadline < ?
-    `).get(today) as { count: number }
+    const taskRows = db.prepare(`
+      SELECT t.id, t.department, t.deadline, t.status,
+        EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        ) as has_active_supervision,
+        (SELECT next_follow_up_date FROM task_supervisions ts
+         WHERE ts.task_id = t.id AND ts.status = 'active'
+         ORDER BY ts.created_at DESC, ts.id DESC LIMIT 1) as next_follow_up_date,
+        (SELECT f.next_follow_up_date FROM supervision_follow_ups f
+         INNER JOIN task_supervisions ts ON f.supervision_id = ts.id
+         WHERE ts.task_id = t.id AND ts.status = 'active'
+         ORDER BY f.created_at DESC, f.id DESC LIMIT 1) as follow_up_next_date
+      FROM tasks t
+      WHERE t.status != 'completed'
+    `).all() as TaskRow[]
 
-    const dueThisWeekCount = db.prepare(`
-      SELECT COUNT(*) as count
-      FROM tasks
-      WHERE status != 'completed'
-        AND deadline >= ?
-        AND deadline <= ?
-        AND deadline >= ?
-    `).get(start, end, today) as { count: number }
+    let overdueCount = 0
+    let upcomingCount = 0
+
+    const seenTaskIds = new Set<number>()
+
+    taskRows.forEach((row) => {
+      if (seenTaskIds.has(row.id)) return
+
+      const rule = getReminderRuleForDepartment(row.department)
+
+      const deadlineStr = row.deadline.split('T')[0].split(' ')[0]
+
+      let effectiveDateStr = deadlineStr
+
+      if (rule.includeSupervisionFollowUp && row.has_active_supervision) {
+        const supervisionNextDate = row.next_follow_up_date
+          ? row.next_follow_up_date.split('T')[0].split(' ')[0]
+          : null
+
+        const followUpNextDate = row.follow_up_next_date
+          ? row.follow_up_next_date.split('T')[0].split(' ')[0]
+          : null
+
+        const effectiveSupervisionDate = followUpNextDate || supervisionNextDate
+
+        if (effectiveSupervisionDate && effectiveSupervisionDate < deadlineStr) {
+          effectiveDateStr = effectiveSupervisionDate
+        }
+      }
+
+      const effectiveDate = new Date(effectiveDateStr)
+      effectiveDate.setHours(0, 0, 0, 0)
+
+      if (effectiveDate < today) {
+        if (rule.repeatOverdue) {
+          overdueCount++
+          seenTaskIds.add(row.id)
+        }
+      } else {
+        const diffTime = effectiveDate.getTime() - today.getTime()
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+
+        if (diffDays <= rule.advanceDays) {
+          upcomingCount++
+          seenTaskIds.add(row.id)
+        }
+      }
+    })
 
     const stats: Stats = {
       totalMeetings: meetingsCount.count,
       totalTasks: tasksCount.count,
-      overdueTasks: overdueCount.count,
-      dueThisWeekTasks: dueThisWeekCount.count,
+      overdueTasks: overdueCount,
+      dueSoonTasks: upcomingCount,
       completedTasks: completedCount.count,
     }
 

@@ -22,6 +22,8 @@ import type {
   DepartmentRiskDetail,
   CalendarMonthData,
   ReminderGroups,
+  ReminderRule,
+  UpdateReminderRuleRequest,
   MeetingReviewStats,
   MeetingReviewDetail,
   MeetingReviewReport,
@@ -75,6 +77,7 @@ interface AppState {
   supervisingTasks: Task[]
   taskViews: TaskView[]
   currentViewId: number | null
+  reminderRules: Array<{ rule: ReminderRule; isDefault: boolean }>
   loading: boolean
   error: string | null
 
@@ -131,6 +134,10 @@ interface AppState {
   fetchTaskAuditLogs: (taskId: number) => Promise<AuditLog[]>
   fetchMeetingAuditLogs: (meetingId: number) => Promise<AuditLog[]>
   fetchDepartmentAuditLogs: (department: string, limit?: number, offset?: number) => Promise<{ list: AuditLog[]; total: number; limit: number; offset: number }>
+  fetchReminderRules: () => Promise<void>
+  fetchReminderRuleForDepartment: (department: string) => Promise<ReminderRule | null>
+  updateReminderRule: (department: string, data: UpdateReminderRuleRequest) => Promise<ReminderRule>
+  deleteReminderRule: (department: string) => Promise<void>
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -159,6 +166,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   supervisingTasks: [],
   taskViews: [],
   currentViewId: null,
+  reminderRules: [],
   loading: false,
   error: null,
 
@@ -912,6 +920,66 @@ export const useAppStore = create<AppState>((set, get) => ({
       return res
     } catch (error) {
       set({ error: getErrorMessage(error) })
+      throw error
+    }
+  },
+
+  fetchReminderRules: async () => {
+    set({ loading: true, error: null })
+    try {
+      const rules = await api.get<Array<{ rule: ReminderRule; isDefault: boolean }>>(
+        '/reminder-rules/all-with-defaults'
+      )
+      set({ reminderRules: rules, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+    }
+  },
+
+  fetchReminderRuleForDepartment: async (department) => {
+    set({ loading: true, error: null })
+    try {
+      const rule = await api.get<ReminderRule>(
+        `/reminder-rules/department/${encodeURIComponent(department)}`
+      )
+      set({ loading: false })
+      return rule
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      return null
+    }
+  },
+
+  updateReminderRule: async (department, data) => {
+    set({ loading: true, error: null })
+    try {
+      const rule = await api.put<ReminderRule>(
+        `/reminder-rules/department/${encodeURIComponent(department)}`,
+        data
+      )
+      set({ loading: false })
+      const { fetchReminderRules, fetchReminders, fetchStats } = get()
+      fetchReminderRules()
+      fetchReminders()
+      fetchStats()
+      return rule
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  deleteReminderRule: async (department) => {
+    set({ loading: true, error: null })
+    try {
+      await api.delete(`/reminder-rules/department/${encodeURIComponent(department)}`)
+      set({ loading: false })
+      const { fetchReminderRules, fetchReminders, fetchStats } = get()
+      fetchReminderRules()
+      fetchReminders()
+      fetchStats()
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
       throw error
     }
   },

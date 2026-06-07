@@ -29,7 +29,7 @@ export default function ReminderPanel({ isOpen, onClose }: ReminderPanelProps) {
   const totalCount = reminderGroups
     ? reminderGroups.overdue.length +
       reminderGroups.today.length +
-      reminderGroups.nextThreeDays.length
+      reminderGroups.upcoming.length
     : 0
 
   const handleTaskClick = (task: Task) => {
@@ -75,13 +75,13 @@ export default function ReminderPanel({ isOpen, onClose }: ReminderPanelProps) {
     return Math.ceil(diff / (1000 * 60 * 60 * 24))
   }
 
-  const TaskItem = ({ task, type }: { task: Task; type: 'overdue' | 'today' | 'nextThreeDays' }) => {
+  const TaskItem = ({ task, type }: { task: Task; type: 'overdue' | 'today' | 'upcoming' }) => {
     const daysLeft = getDaysLeft(task.deadline)
 
     const typeStyles = {
       overdue: 'border-l-red-500 bg-red-50/50 hover:bg-red-50',
       today: 'border-l-amber-500 bg-amber-50/50 hover:bg-amber-50',
-      nextThreeDays: 'border-l-blue-500 bg-blue-50/50 hover:bg-blue-50',
+      upcoming: 'border-l-blue-500 bg-blue-50/50 hover:bg-blue-50',
     }
 
     return (
@@ -112,7 +112,7 @@ export default function ReminderPanel({ isOpen, onClose }: ReminderPanelProps) {
               'font-medium',
               type === 'overdue' && 'text-red-600',
               type === 'today' && 'text-amber-600',
-              type === 'nextThreeDays' && 'text-blue-600'
+              type === 'upcoming' && 'text-blue-600'
             )}
           >
             {type === 'overdue'
@@ -146,7 +146,7 @@ export default function ReminderPanel({ isOpen, onClose }: ReminderPanelProps) {
     title: string
     icon: React.ElementType
     tasks: Task[]
-    type: 'overdue' | 'today' | 'nextThreeDays'
+    type: 'overdue' | 'today' | 'upcoming'
     badgeColor: string
   }) => {
     if (tasks.length === 0) return null
@@ -161,7 +161,7 @@ export default function ReminderPanel({ isOpen, onClose }: ReminderPanelProps) {
               'px-1.5 py-0.5 rounded-full text-xs font-medium',
               type === 'overdue' && 'bg-red-100 text-red-700',
               type === 'today' && 'bg-amber-100 text-amber-700',
-              type === 'nextThreeDays' && 'bg-blue-100 text-blue-700'
+              type === 'upcoming' && 'bg-blue-100 text-blue-700'
             )}
           >
             {tasks.length}
@@ -237,8 +237,8 @@ export default function ReminderPanel({ isOpen, onClose }: ReminderPanelProps) {
               <GroupSection
                 title="三天内到期"
                 icon={CalendarDays}
-                tasks={reminderGroups?.nextThreeDays || []}
-                type="nextThreeDays"
+                tasks={reminderGroups?.upcoming || []}
+                type="upcoming"
                 badgeColor="text-blue-500"
               />
             </>

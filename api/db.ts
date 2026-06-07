@@ -193,6 +193,18 @@ function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_audit_logs_department ON audit_logs(department);
     CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id);
     CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+
+    CREATE TABLE IF NOT EXISTS reminder_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      department TEXT NOT NULL UNIQUE,
+      advance_days INTEGER NOT NULL DEFAULT 3,
+      include_supervision_follow_up INTEGER NOT NULL DEFAULT 0,
+      repeat_overdue INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT DEFAULT (datetime('now', 'localtime')),
+      updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reminder_rules_department ON reminder_rules(department);
   `)
 
   const meetingCount = db.prepare('SELECT COUNT(*) as count FROM meetings').get() as { count: number }

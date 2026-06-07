@@ -11,6 +11,7 @@ import {
   Calendar as CalendarIcon,
   BarChart3,
   Layers,
+  Settings,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 import ReminderPanel from './ReminderPanel'
@@ -25,6 +26,7 @@ const navItems = [
   { path: '/calendar', label: '任务日历', icon: CalendarIcon },
   { path: '/templates', label: '模板库', icon: LayoutTemplate },
   { path: '/departments', label: '科室管理', icon: Building2 },
+  { path: '/reminder-rules', label: '提醒规则', icon: Settings },
 ]
 
 interface LayoutProps {
@@ -44,7 +46,7 @@ export default function Layout({ children }: LayoutProps) {
   const totalReminders = reminderGroups
     ? reminderGroups.overdue.length +
       reminderGroups.today.length +
-      reminderGroups.nextThreeDays.length
+      reminderGroups.upcoming.length
     : 0
 
   const togglePanel = () => {
