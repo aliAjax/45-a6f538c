@@ -11,23 +11,45 @@ import {
   TrendingDown,
   CheckCircle2,
   BarChart3,
+  ChevronDown,
+  ChevronUp,
+  Filter,
+  Printer,
+  Clock,
+  Eye,
+  MessageSquare,
+  Megaphone,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import { cn } from '../lib/utils'
-import type { MeetingReviewStats } from '../../shared/types'
+import type { MeetingReviewStats, Task, TaskProgress, MeetingReviewFilter } from '../../shared/types'
+import StatusBadge from '../components/StatusBadge'
 
 export default function MeetingReview() {
   const navigate = useNavigate()
-  const { meetingReviewList, meetingReviewTotal, fetchMeetingReviewStats, loading } = useAppStore()
-  const [search, setSearch] = useState('')
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
+  const { meetingReviewList, meetingReviewTotal, fetchMeetingReviewStats, fetchDepartments, departments, loading } = useAppStore()
+  const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [detailData, setDetailData] = useState<Map<number, { uncompletedTasks: Task[]; recentProgress: TaskProgress[] }>>(new Map())
+  const [detailLoading, setDetailLoading] = useState<number | null>(null)
+  const [filter, setFilter] = useState<MeetingReviewFilter>({
+    startDate: '',
+    endDate: '',
+    department: '',
+    status: 'all',
+    overdueOnly: false,
+    supervisingOnly: false,
+    search: '',
+  })
   const [page, setPage] = useState(1)
   const pageSize = 10
 
   useEffect(() => {
-    fetchMeetingReviewStats(page, pageSize, startDate, endDate, search)
-  }, [fetchMeetingReviewStats, page, startDate, endDate, search])
+    fetchDepartments()
+  }, [fetchDepartments])
+
+  useEffect(() => {
+    fetchMeetingReviewStats(page, pageSize, filter)
+  }, [fetchMeetingReviewStats, page, filter])
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
@@ -35,10 +57,42 @@ export default function MeetingReview() {
   }
 
   const handleReset = () => {
-    setSearch('')
-    setStartDate('')
-    setEndDate('')
+    setFilter({
+      startDate: '',
+      endDate: '',
+      department: '',
+      status: 'all',
+      overdueOnly: false,
+      supervisingOnly: false,
+      search: '',
+    })
     setPage(1)
+    setExpandedId(null)
+  }
+
+  const handleToggleExpand = async (meetingId: number) => {
+    if (expandedId === meetingId) {
+      setExpandedId(null)
+      return
+    }
+
+    setExpandedId(meetingId)
+
+    if (!detailData.has(meetingId)) {
+      setDetailLoading(meetingId)
+      try {
+        const { fetchMeetingReviewDetail } = useAppStore.getState()
+        const detail = await fetchMeetingReviewDetail(meetingId)
+        if (detail) {
+          setDetailData((prev) => new Map(prev).set(meetingId, {
+            uncompletedTasks: detail.uncompletedTasks,
+            recentProgress: detail.recentProgress,
+          }))
+        }
+      } finally {
+        setDetailLoading(null)
+      }
+    }
   }
 
   const totalPages = Math.ceil(meetingReviewTotal / pageSize)
@@ -48,16 +102,37 @@ export default function MeetingReview() {
       acc.total += item.totalTasks
       acc.completed += item.completedTasks
       acc.overdue += item.overdueTasks
+      acc.supervising += item.supervisingTasks
       return acc
     },
-    { total: 0, completed: 0, overdue: 0 }
+    { total: 0, completed: 0, overdue: 0, supervising: 0 }
   )
+
+  const handleExportReport = () => {
+    const params = new URLSearchParams()
+    if (filter.startDate) params.append('startDate', filter.startDate)
+    if (filter.endDate) params.append('endDate', filter.endDate)
+    if (filter.department) params.append('department', filter.department)
+    if (filter.status) params.append('status', filter.status)
+    if (filter.overdueOnly) params.append('overdueOnly', 'true')
+    if (filter.supervisingOnly) params.append('supervisingOnly', 'true')
+    navigate(`/review/report?${params}`)
+  }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-800 mb-1">会议复盘看板</h1>
-        <p className="text-slate-500 text-sm">按会议维度统计事项完成情况，追踪会议决议落地效果</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800 mb-1">会议复盘看板</h1>
+          <p className="text-slate-500 text-sm">按会议维度统计事项完成情况，追踪会议决议落地效果</p>
+        </div>
+        <button
+          onClick={handleExportReport}
+          className="inline-flex items-center gap-2 px-4 py-2.5 bg-primary-600 text-white text-sm font-medium rounded-xl hover:bg-primary-700 transition-colors shadow-sm"
+        >
+          <Printer className="w-4 h-4" />
+          复盘报表
+        </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -109,52 +184,111 @@ export default function MeetingReview() {
 
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         <div className="p-4 border-b border-slate-100">
-          <form onSubmit={handleSearch} className="flex flex-wrap items-center gap-3">
-            <div className="relative flex-1 min-w-[200px] max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-slate-400" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="搜索会议主题..."
-                className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
-              />
+          <form onSubmit={handleSearch} className="space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative flex-1 min-w-[200px] max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4.5 h-4.5 text-slate-400" />
+                <input
+                  type="text"
+                  value={filter.search || ''}
+                  onChange={(e) => setFilter((f) => ({ ...f, search: e.target.value }))}
+                  placeholder="搜索会议主题..."
+                  className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Calendar className="w-4.5 h-4.5 text-slate-400" />
+                <input
+                  type="date"
+                  value={filter.startDate || ''}
+                  onChange={(e) => {
+                    setFilter((f) => ({ ...f, startDate: e.target.value }))
+                    setPage(1)
+                  }}
+                  className="px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
+                />
+                <span className="text-slate-400">至</span>
+                <input
+                  type="date"
+                  value={filter.endDate || ''}
+                  onChange={(e) => {
+                    setFilter((f) => ({ ...f, endDate: e.target.value }))
+                    setPage(1)
+                  }}
+                  className="px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
+                />
+              </div>
+              <button
+                type="submit"
+                className="px-4 py-2.5 bg-slate-100 text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-200 transition-colors"
+              >
+                搜索
+              </button>
+              <button
+                type="button"
+                onClick={handleReset}
+                className="px-4 py-2.5 text-slate-500 text-sm font-medium rounded-xl hover:bg-slate-100 transition-colors"
+              >
+                重置
+              </button>
             </div>
-            <div className="flex items-center gap-2">
-              <Calendar className="w-4.5 h-4.5 text-slate-400" />
-              <input
-                type="date"
-                value={startDate}
+
+            <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-100">
+              <div className="flex items-center gap-2">
+                <Filter className="w-4 h-4 text-slate-400" />
+                <span className="text-sm text-slate-500">筛选：</span>
+              </div>
+              <select
+                value={filter.department || ''}
                 onChange={(e) => {
-                  setStartDate(e.target.value)
+                  setFilter((f) => ({ ...f, department: e.target.value }))
                   setPage(1)
                 }}
-                className="px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
-              />
-              <span className="text-slate-400">至</span>
-              <input
-                type="date"
-                value={endDate}
+                className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
+              >
+                <option value="">全部责任科室</option>
+                {departments.map((dept) => (
+                  <option key={dept} value={dept}>{dept}</option>
+                ))}
+              </select>
+              <select
+                value={filter.status || 'all'}
                 onChange={(e) => {
-                  setEndDate(e.target.value)
+                  setFilter((f) => ({ ...f, status: e.target.value as MeetingReviewFilter['status'] }))
                   setPage(1)
                 }}
-                className="px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
-              />
+                className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
+              >
+                <option value="all">全部状态</option>
+                <option value="pending">待办理</option>
+                <option value="in_progress">进行中</option>
+                <option value="completed">已完成</option>
+              </select>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filter.overdueOnly || false}
+                  onChange={(e) => {
+                    setFilter((f) => ({ ...f, overdueOnly: e.target.checked }))
+                    setPage(1)
+                  }}
+                  className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                />
+                <span className="text-sm text-slate-600">仅看逾期</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filter.supervisingOnly || false}
+                  onChange={(e) => {
+                    setFilter((f) => ({ ...f, supervisingOnly: e.target.checked }))
+                    setPage(1)
+                  }}
+                  className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                />
+                <span className="text-sm text-slate-600">仅看督办</span>
+              </label>
             </div>
-            <button
-              type="submit"
-              className="px-4 py-2.5 bg-slate-100 text-slate-700 text-sm font-medium rounded-xl hover:bg-slate-200 transition-colors"
-            >
-              搜索
-            </button>
-            <button
-              type="button"
-              onClick={handleReset}
-              className="px-4 py-2.5 text-slate-500 text-sm font-medium rounded-xl hover:bg-slate-100 transition-colors"
-            >
-              重置
-            </button>
           </form>
         </div>
 
@@ -175,6 +309,10 @@ export default function MeetingReview() {
               <MeetingReviewCard
                 key={meeting.meetingId}
                 meeting={meeting}
+                isExpanded={expandedId === meeting.meetingId}
+                isLoading={detailLoading === meeting.meetingId}
+                detailData={detailData.get(meeting.meetingId)}
+                onToggleExpand={() => handleToggleExpand(meeting.meetingId)}
                 onClick={() => navigate(`/meetings/${meeting.meetingId}`)}
               />
             ))
@@ -236,123 +374,248 @@ export default function MeetingReview() {
 
 function MeetingReviewCard({
   meeting,
+  isExpanded,
+  isLoading,
+  detailData,
+  onToggleExpand,
   onClick,
 }: {
   meeting: MeetingReviewStats
+  isExpanded: boolean
+  isLoading: boolean
+  detailData?: { uncompletedTasks: Task[]; recentProgress: TaskProgress[] }
+  onToggleExpand: () => void
   onClick: () => void
 }) {
   const isLowCompletion = meeting.completionRate < 60
   const hasManyOverdue = meeting.overdueTasks > 0
   const isWarning = isLowCompletion || hasManyOverdue
 
+  const handleExpandClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    onToggleExpand()
+  }
+
   return (
     <div
-      onClick={onClick}
       className={cn(
-        'p-5 rounded-xl border cursor-pointer transition-all hover:shadow-md group',
+        'rounded-xl border transition-all',
         isWarning
-          ? 'border-red-200 bg-red-50/30 hover:border-red-300'
-          : 'border-slate-200 bg-white hover:border-slate-300'
+          ? 'border-red-200 bg-red-50/30'
+          : 'border-slate-200 bg-white'
       )}
     >
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <div
-            className={cn(
-              'w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0',
-              isWarning ? 'bg-red-100' : 'bg-primary-50'
-            )}
-          >
-            <FileText
+      <div
+        onClick={onClick}
+        className={cn(
+          'p-5 cursor-pointer hover:shadow-md group transition-all',
+          isExpanded ? '' : ''
+        )}
+      >
+        <div className="flex items-start justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div
               className={cn(
-                'w-5 h-5',
-                isWarning ? 'text-red-600' : 'text-primary-600'
-              )}
-            />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-slate-800 group-hover:text-primary-600 transition-colors">
-                {meeting.meetingTitle}
-              </h3>
-              {isWarning && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-100 text-red-700 text-[10px] font-medium rounded-full">
-                  <AlertTriangle className="w-3 h-3" />
-                  需关注
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
-              <span className="flex items-center gap-1">
-                <Calendar className="w-3.5 h-3.5" />
-                {meeting.meetingDate}
-              </span>
-              <span className="flex items-center gap-1">
-                <Building2 className="w-3.5 h-3.5" />
-                {meeting.departments}
-              </span>
-            </div>
-          </div>
-        </div>
-        <div className="text-right">
-          <div className="flex items-center gap-1">
-            <span
-              className={cn(
-                'text-2xl font-bold',
-                meeting.completionRate >= 80
-                  ? 'text-green-600'
-                  : meeting.completionRate >= 60
-                    ? 'text-amber-600'
-                    : 'text-red-600'
+                'w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0',
+                isWarning ? 'bg-red-100' : 'bg-primary-50'
               )}
             >
-              {meeting.completionRate}%
-            </span>
-            {meeting.completionRate < 60 && (
-              <TrendingDown className="w-4 h-4 text-red-500" />
-            )}
+              <FileText
+                className={cn(
+                  'w-5 h-5',
+                  isWarning ? 'text-red-600' : 'text-primary-600'
+                )}
+              />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-slate-800 group-hover:text-primary-600 transition-colors">
+                  {meeting.meetingTitle}
+                </h3>
+                {isWarning && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-100 text-red-700 text-[10px] font-medium rounded-full">
+                    <AlertTriangle className="w-3 h-3" />
+                    需关注
+                  </span>
+                )}
+                {meeting.supervisingTasks > 0 && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-medium rounded-full">
+                    <Megaphone className="w-3 h-3" />
+                    督办中
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
+                <span className="flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5" />
+                  {meeting.meetingDate}
+                </span>
+                <span className="flex items-center gap-1">
+                  <Building2 className="w-3.5 h-3.5" />
+                  {meeting.departments}
+                </span>
+              </div>
+            </div>
           </div>
-          <p className="text-xs text-slate-500">完成率</p>
+          <div className="flex items-center gap-3">
+            <div className="text-right">
+              <div className="flex items-center gap-1">
+                <span
+                  className={cn(
+                    'text-2xl font-bold',
+                    meeting.completionRate >= 80
+                      ? 'text-green-600'
+                      : meeting.completionRate >= 60
+                        ? 'text-amber-600'
+                        : 'text-red-600'
+                  )}
+                >
+                  {meeting.completionRate}%
+                </span>
+                {meeting.completionRate < 60 && (
+                  <TrendingDown className="w-4 h-4 text-red-500" />
+                )}
+              </div>
+              <p className="text-xs text-slate-500">完成率</p>
+            </div>
+            <button
+              onClick={handleExpandClick}
+              className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
+            >
+              {isExpanded ? (
+                <ChevronUp className="w-5 h-5 text-slate-500" />
+              ) : (
+                <ChevronDown className="w-5 h-5 text-slate-500" />
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-5 gap-3 mb-4">
+          <div className="text-center p-3 bg-slate-50 rounded-lg">
+            <p className="text-lg font-bold text-slate-800">{meeting.totalTasks}</p>
+            <p className="text-xs text-slate-500">事项总数</p>
+          </div>
+          <div className="text-center p-3 bg-green-50 rounded-lg">
+            <p className="text-lg font-bold text-green-600">{meeting.completedTasks}</p>
+            <p className="text-xs text-green-600">已完成</p>
+          </div>
+          <div className="text-center p-3 bg-amber-50 rounded-lg">
+            <p className="text-lg font-bold text-amber-600">{meeting.pendingTasks + meeting.inProgressTasks}</p>
+            <p className="text-xs text-amber-600">进行中</p>
+          </div>
+          <div className="text-center p-3 bg-red-50 rounded-lg">
+            <p className="text-lg font-bold text-red-600">{meeting.overdueTasks}</p>
+            <p className="text-xs text-red-600">逾期</p>
+          </div>
+          <div className="text-center p-3 bg-violet-50 rounded-lg">
+            <p className="text-lg font-bold text-violet-600">{meeting.supervisingTasks}</p>
+            <p className="text-xs text-violet-600">督办</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+            <div
+              className={cn(
+                'h-full rounded-full transition-all',
+                meeting.completionRate >= 80
+                  ? 'bg-gradient-to-r from-green-400 to-green-500'
+                  : meeting.completionRate >= 60
+                    ? 'bg-gradient-to-r from-amber-400 to-amber-500'
+                    : 'bg-gradient-to-r from-red-400 to-red-500'
+              )}
+              style={{ width: `${meeting.completionRate}%` }}
+            />
+          </div>
+          <span className="text-xs text-slate-500 whitespace-nowrap">
+            {meeting.completedTasks}/{meeting.totalTasks} 项
+          </span>
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-3 mb-4">
-        <div className="text-center p-3 bg-slate-50 rounded-lg">
-          <p className="text-lg font-bold text-slate-800">{meeting.totalTasks}</p>
-          <p className="text-xs text-slate-500">事项总数</p>
-        </div>
-        <div className="text-center p-3 bg-green-50 rounded-lg">
-          <p className="text-lg font-bold text-green-600">{meeting.completedTasks}</p>
-          <p className="text-xs text-green-600">已完成</p>
-        </div>
-        <div className="text-center p-3 bg-amber-50 rounded-lg">
-          <p className="text-lg font-bold text-amber-600">{meeting.pendingTasks + meeting.inProgressTasks}</p>
-          <p className="text-xs text-amber-600">进行中</p>
-        </div>
-        <div className="text-center p-3 bg-red-50 rounded-lg">
-          <p className="text-lg font-bold text-red-600">{meeting.overdueTasks}</p>
-          <p className="text-xs text-red-600">逾期</p>
-        </div>
-      </div>
+      {isExpanded && (
+        <div className="border-t border-slate-100 p-5 bg-slate-50/50">
+          {isLoading ? (
+            <div className="py-8 text-center text-slate-500 text-sm">
+              加载详情中...
+            </div>
+          ) : detailData ? (
+            <div className="space-y-5">
+              <div>
+                <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                  <Eye className="w-4 h-4" />
+                  未完成事项 ({detailData.uncompletedTasks.length})
+                </h4>
+                {detailData.uncompletedTasks.length === 0 ? (
+                  <div className="py-4 text-center text-sm text-slate-400">
+                    所有事项已完成
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {detailData.uncompletedTasks.map((task) => (
+                      <div
+                        key={task.id}
+                        className="flex items-start gap-3 p-3 bg-white rounded-lg border border-slate-100"
+                      >
+                        <StatusBadge status={task.status} size="sm" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-slate-800 line-clamp-2">{task.content}</p>
+                          <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
+                            <span className="flex items-center gap-1">
+                              <Building2 className="w-3 h-3" />
+                              {task.department}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {task.deadline}
+                            </span>
+                            {task.hasActiveSupervision && (
+                              <span className="flex items-center gap-1 text-amber-600">
+                                <Megaphone className="w-3 h-3" />
+                                督办中
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
-      <div className="flex items-center gap-3">
-        <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-          <div
-            className={cn(
-              'h-full rounded-full transition-all',
-              meeting.completionRate >= 80
-                ? 'bg-gradient-to-r from-green-400 to-green-500'
-                : meeting.completionRate >= 60
-                  ? 'bg-gradient-to-r from-amber-400 to-amber-500'
-                  : 'bg-gradient-to-r from-red-400 to-red-500'
-            )}
-            style={{ width: `${meeting.completionRate}%` }}
-          />
+              <div>
+                <h4 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                  <MessageSquare className="w-4 h-4" />
+                  最近进展
+                </h4>
+                {detailData.recentProgress.length === 0 ? (
+                  <div className="py-4 text-center text-sm text-slate-400">
+                    暂无进展记录
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {detailData.recentProgress.map((progress) => (
+                      <div
+                        key={progress.id}
+                        className="p-3 bg-white rounded-lg border border-slate-100"
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <StatusBadge status={progress.status} size="sm" />
+                          <span className="text-xs text-slate-400">{progress.createdAt}</span>
+                        </div>
+                        <p className="text-sm text-slate-600">
+                          {progress.progress || '无进展描述'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
         </div>
-        <span className="text-xs text-slate-500 whitespace-nowrap">
-          {meeting.completedTasks}/{meeting.totalTasks} 项
-        </span>
-      </div>
+      )}
     </div>
   )
 }

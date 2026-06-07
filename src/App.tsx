@@ -6,6 +6,7 @@ import MeetingNew from './pages/MeetingNew'
 import MeetingDetail from './pages/MeetingDetail'
 import MeetingPrint from './pages/MeetingPrint'
 import MeetingReview from './pages/MeetingReview'
+import MeetingReviewReport from './pages/MeetingReviewReport'
 import MeetingImport from './pages/MeetingImport'
 import MeetingImportPreview from './pages/MeetingImportPreview'
 import TaskList from './pages/TaskList'
@@ -19,6 +20,7 @@ export default function App() {
     <Router>
       <Routes>
         <Route path="/meetings/:id/print" element={<MeetingPrint />} />
+        <Route path="/review/report" element={<MeetingReviewReport />} />
         <Route
           path="*"
           element={

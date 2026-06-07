@@ -250,7 +250,64 @@ export interface MeetingReviewStats {
   pendingTasks: number
   inProgressTasks: number
   overdueTasks: number
+  supervisingTasks: number
   completionRate: number
+}
+
+export interface MeetingReviewFilter {
+  startDate?: string
+  endDate?: string
+  department?: string
+  status?: 'all' | 'pending' | 'in_progress' | 'completed'
+  overdueOnly?: boolean
+  supervisingOnly?: boolean
+  search?: string
+}
+
+export interface MeetingReviewDetail {
+  meetingId: number
+  meetingTitle: string
+  meetingDate: string
+  departments: string
+  totalTasks: number
+  completedTasks: number
+  pendingTasks: number
+  inProgressTasks: number
+  overdueTasks: number
+  supervisingTasks: number
+  completionRate: number
+  uncompletedTasks: Task[]
+  recentProgress: TaskProgress[]
+}
+
+export interface DepartmentReviewStats {
+  department: string
+  totalTasks: number
+  completedTasks: number
+  pendingTasks: number
+  inProgressTasks: number
+  overdueTasks: number
+  supervisingTasks: number
+  completionRate: number
+  meetingCount: number
+}
+
+export interface MeetingReviewReport {
+  summary: {
+    totalMeetings: number
+    totalTasks: number
+    completedTasks: number
+    pendingTasks: number
+    inProgressTasks: number
+    overdueTasks: number
+    supervisingTasks: number
+    overallCompletionRate: number
+  }
+  meetingStats: MeetingReviewStats[]
+  departmentStats: DepartmentReviewStats[]
+  generatedAt: string
+  startDate?: string
+  endDate?: string
 }
 
 export interface ParsedTask {

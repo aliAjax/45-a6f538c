@@ -7,6 +7,9 @@ import type {
   SupervisionFollowUp,
   CreateMeetingRequest,
   MeetingReviewStats,
+  MeetingReviewDetail,
+  DepartmentReviewStats,
+  MeetingReviewReport,
   ParsedMeeting,
   ParsedTask,
   ParseMeetingRequest,
@@ -769,7 +772,7 @@ router.post('/parse', (req: Request, res: Response) => {
 
 router.get('/review/stats', (req: Request, res: Response) => {
   try {
-    const { startDate, endDate, search, page = '1', pageSize = '10' } = req.query
+    const { startDate, endDate, search, department, status, overdueOnly, supervisingOnly, page = '1', pageSize = '10' } = req.query
 
     const today = new Date().toISOString().split('T')[0]
 
@@ -788,12 +791,29 @@ router.get('/review/stats', (req: Request, res: Response) => {
       whereConditions.push('m.title LIKE ?')
       params.push(`%${search}%`)
     }
+    if (department && department !== 'all') {
+      whereConditions.push('(t.department = ? OR m.departments LIKE ?)')
+      params.push(String(department), `%${department}%`)
+    }
+    if (status && status !== 'all') {
+      whereConditions.push('t.status = ?')
+      params.push(String(status))
+    }
+    if (overdueOnly === 'true') {
+      whereConditions.push('t.status != ? AND t.deadline < ?')
+      params.push('completed', today)
+    }
+    if (supervisingOnly === 'true') {
+      whereConditions.push('EXISTS (SELECT 1 FROM task_supervisions ts WHERE ts.task_id = t.id AND ts.status = ?)')
+      params.push('active')
+    }
 
     const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : ''
 
     const countSql = `
       SELECT COUNT(DISTINCT m.id) as count
       FROM meetings m
+      LEFT JOIN tasks t ON m.id = t.meeting_id
       ${whereClause}
     `
     const countRow = db.prepare(countSql).get(...params) as { count: number }
@@ -807,15 +827,17 @@ router.get('/review/stats', (req: Request, res: Response) => {
         m.title as meetingTitle,
         m.meeting_date as meetingDate,
         m.departments as departments,
-        COUNT(t.id) as totalTasks,
+        COUNT(DISTINCT t.id) as totalTasks,
         SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) as completedTasks,
         SUM(CASE WHEN t.status = 'pending' THEN 1 ELSE 0 END) as pendingTasks,
         SUM(CASE WHEN t.status = 'in_progress' THEN 1 ELSE 0 END) as inProgressTasks,
-        SUM(CASE WHEN t.status != 'completed' AND t.deadline < ? THEN 1 ELSE 0 END) as overdueTasks
+        SUM(CASE WHEN t.status != 'completed' AND t.deadline < ? THEN 1 ELSE 0 END) as overdueTasks,
+        SUM(CASE WHEN EXISTS (SELECT 1 FROM task_supervisions ts WHERE ts.task_id = t.id AND ts.status = 'active') THEN 1 ELSE 0 END) as supervisingTasks
       FROM meetings m
       LEFT JOIN tasks t ON m.id = t.meeting_id
       ${whereClause}
       GROUP BY m.id
+      HAVING totalTasks > 0
       ORDER BY m.meeting_date DESC, m.id DESC
       LIMIT ? OFFSET ?
     `
@@ -830,6 +852,7 @@ router.get('/review/stats', (req: Request, res: Response) => {
       pendingTasks: number
       inProgressTasks: number
       overdueTasks: number
+      supervisingTasks: number
     }>
 
     const list: MeetingReviewStats[] = statsRows.map((row) => ({
@@ -842,6 +865,7 @@ router.get('/review/stats', (req: Request, res: Response) => {
       pendingTasks: row.pendingTasks,
       inProgressTasks: row.inProgressTasks,
       overdueTasks: row.overdueTasks,
+      supervisingTasks: row.supervisingTasks,
       completionRate: row.totalTasks > 0
         ? Math.round((row.completedTasks / row.totalTasks) * 100)
         : 0,
@@ -859,6 +883,242 @@ router.get('/review/stats', (req: Request, res: Response) => {
   } catch (error) {
     console.error('Get meeting review stats error:', error)
     res.status(500).json({ success: false, error: '获取会议复盘统计失败' })
+  }
+})
+
+router.get('/review/detail/:id', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const today = new Date().toISOString().split('T')[0]
+
+    const meetingRow = db.prepare('SELECT * FROM meetings WHERE id = ?').get(id) as MeetingRow | undefined
+    if (!meetingRow) {
+      return res.status(404).json({ success: false, error: '会议不存在' })
+    }
+
+    const taskRows = db.prepare(`
+      SELECT t.*,
+        EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        ) as has_active_supervision
+      FROM tasks t
+      WHERE t.meeting_id = ?
+      ORDER BY t.id ASC
+    `).all(id) as TaskRow[]
+
+    const tasks = taskRows.map(rowToTask)
+    const uncompletedTasks = tasks.filter((t) => t.status !== 'completed')
+
+    const progressRows = db.prepare(`
+      SELECT tp.*
+      FROM task_progress tp
+      INNER JOIN tasks t ON tp.task_id = t.id
+      WHERE t.meeting_id = ?
+      ORDER BY tp.created_at DESC
+      LIMIT 20
+    `).all(id) as Array<{
+      id: number
+      task_id: number
+      status: string
+      progress: string | null
+      created_at: string
+    }>
+
+    const recentProgress = progressRows.map((row) => ({
+      id: row.id,
+      taskId: row.task_id,
+      status: row.status as Task['status'],
+      progress: row.progress || '',
+      createdAt: row.created_at,
+    }))
+
+    const totalTasks = tasks.length
+    const completedTasks = tasks.filter((t) => t.status === 'completed').length
+    const pendingTasks = tasks.filter((t) => t.status === 'pending').length
+    const inProgressTasks = tasks.filter((t) => t.status === 'in_progress').length
+    const overdueTasks = tasks.filter((t) => t.status !== 'completed' && t.deadline < today).length
+    const supervisingTasks = tasks.filter((t) => t.hasActiveSupervision).length
+
+    const detail: MeetingReviewDetail = {
+      meetingId: meetingRow.id,
+      meetingTitle: meetingRow.title,
+      meetingDate: meetingRow.meeting_date,
+      departments: meetingRow.departments,
+      totalTasks,
+      completedTasks,
+      pendingTasks,
+      inProgressTasks,
+      overdueTasks,
+      supervisingTasks,
+      completionRate: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+      uncompletedTasks,
+      recentProgress,
+    }
+
+    res.json({ success: true, data: detail })
+  } catch (error) {
+    console.error('Get meeting review detail error:', error)
+    res.status(500).json({ success: false, error: '获取会议复盘详情失败' })
+  }
+})
+
+router.get('/review/report', (req: Request, res: Response) => {
+  try {
+    const { startDate, endDate, department, status, overdueOnly, supervisingOnly } = req.query
+    const today = new Date().toISOString().split('T')[0]
+
+    const whereConditions: string[] = []
+    const params: (string | number)[] = []
+
+    if (startDate) {
+      whereConditions.push('m.meeting_date >= ?')
+      params.push(String(startDate))
+    }
+    if (endDate) {
+      whereConditions.push('m.meeting_date < ?')
+      params.push(addDays(String(endDate), 1))
+    }
+    if (department && department !== 'all') {
+      whereConditions.push('(t.department = ? OR m.departments LIKE ?)')
+      params.push(String(department), `%${department}%`)
+    }
+    if (status && status !== 'all') {
+      whereConditions.push('t.status = ?')
+      params.push(String(status))
+    }
+    if (overdueOnly === 'true') {
+      whereConditions.push('t.status != ? AND t.deadline < ?')
+      params.push('completed', today)
+    }
+    if (supervisingOnly === 'true') {
+      whereConditions.push('EXISTS (SELECT 1 FROM task_supervisions ts WHERE ts.task_id = t.id AND ts.status = ?)')
+      params.push('active')
+    }
+
+    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : ''
+
+    const meetingStatsSql = `
+      SELECT
+        m.id as meetingId,
+        m.title as meetingTitle,
+        m.meeting_date as meetingDate,
+        m.departments as departments,
+        COUNT(DISTINCT t.id) as totalTasks,
+        SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) as completedTasks,
+        SUM(CASE WHEN t.status = 'pending' THEN 1 ELSE 0 END) as pendingTasks,
+        SUM(CASE WHEN t.status = 'in_progress' THEN 1 ELSE 0 END) as inProgressTasks,
+        SUM(CASE WHEN t.status != 'completed' AND t.deadline < ? THEN 1 ELSE 0 END) as overdueTasks,
+        SUM(CASE WHEN EXISTS (SELECT 1 FROM task_supervisions ts WHERE ts.task_id = t.id AND ts.status = 'active') THEN 1 ELSE 0 END) as supervisingTasks
+      FROM meetings m
+      LEFT JOIN tasks t ON m.id = t.meeting_id
+      ${whereClause}
+      GROUP BY m.id
+      HAVING totalTasks > 0
+      ORDER BY m.meeting_date DESC, m.id DESC
+    `
+
+    const meetingStatsRows = db.prepare(meetingStatsSql).all(today, ...params) as Array<{
+      meetingId: number
+      meetingTitle: string
+      meetingDate: string
+      departments: string
+      totalTasks: number
+      completedTasks: number
+      pendingTasks: number
+      inProgressTasks: number
+      overdueTasks: number
+      supervisingTasks: number
+    }>
+
+    const meetingStats: MeetingReviewStats[] = meetingStatsRows.map((row) => ({
+      meetingId: row.meetingId,
+      meetingTitle: row.meetingTitle,
+      meetingDate: row.meetingDate,
+      departments: row.departments,
+      totalTasks: row.totalTasks,
+      completedTasks: row.completedTasks,
+      pendingTasks: row.pendingTasks,
+      inProgressTasks: row.inProgressTasks,
+      overdueTasks: row.overdueTasks,
+      supervisingTasks: row.supervisingTasks,
+      completionRate: row.totalTasks > 0
+        ? Math.round((row.completedTasks / row.totalTasks) * 100)
+        : 0,
+    }))
+
+    const deptStatsSql = `
+      SELECT
+        t.department as department,
+        COUNT(DISTINCT t.id) as totalTasks,
+        COUNT(DISTINCT m.id) as meetingCount,
+        SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) as completedTasks,
+        SUM(CASE WHEN t.status = 'pending' THEN 1 ELSE 0 END) as pendingTasks,
+        SUM(CASE WHEN t.status = 'in_progress' THEN 1 ELSE 0 END) as inProgressTasks,
+        SUM(CASE WHEN t.status != 'completed' AND t.deadline < ? THEN 1 ELSE 0 END) as overdueTasks,
+        SUM(CASE WHEN EXISTS (SELECT 1 FROM task_supervisions ts WHERE ts.task_id = t.id AND ts.status = 'active') THEN 1 ELSE 0 END) as supervisingTasks
+      FROM tasks t
+      INNER JOIN meetings m ON t.meeting_id = m.id
+      ${whereClause}
+      GROUP BY t.department
+      ORDER BY totalTasks DESC
+    `
+
+    const deptStatsRows = db.prepare(deptStatsSql).all(today, ...params) as Array<{
+      department: string
+      totalTasks: number
+      meetingCount: number
+      completedTasks: number
+      pendingTasks: number
+      inProgressTasks: number
+      overdueTasks: number
+      supervisingTasks: number
+    }>
+
+    const departmentStats: DepartmentReviewStats[] = deptStatsRows.map((row) => ({
+      department: row.department,
+      totalTasks: row.totalTasks,
+      meetingCount: row.meetingCount,
+      completedTasks: row.completedTasks,
+      pendingTasks: row.pendingTasks,
+      inProgressTasks: row.inProgressTasks,
+      overdueTasks: row.overdueTasks,
+      supervisingTasks: row.supervisingTasks,
+      completionRate: row.totalTasks > 0
+        ? Math.round((row.completedTasks / row.totalTasks) * 100)
+        : 0,
+    }))
+
+    const totalMeetings = meetingStats.length
+    const totalTasks = meetingStats.reduce((sum, m) => sum + m.totalTasks, 0)
+    const completedTasks = meetingStats.reduce((sum, m) => sum + m.completedTasks, 0)
+    const pendingTasks = meetingStats.reduce((sum, m) => sum + m.pendingTasks, 0)
+    const inProgressTasks = meetingStats.reduce((sum, m) => sum + m.inProgressTasks, 0)
+    const overdueTasks = meetingStats.reduce((sum, m) => sum + m.overdueTasks, 0)
+    const supervisingTasks = meetingStats.reduce((sum, m) => sum + m.supervisingTasks, 0)
+
+    const report: MeetingReviewReport = {
+      summary: {
+        totalMeetings,
+        totalTasks,
+        completedTasks,
+        pendingTasks,
+        inProgressTasks,
+        overdueTasks,
+        supervisingTasks,
+        overallCompletionRate: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+      },
+      meetingStats,
+      departmentStats,
+      generatedAt: new Date().toISOString(),
+      startDate: startDate ? String(startDate) : undefined,
+      endDate: endDate ? String(endDate) : undefined,
+    }
+
+    res.json({ success: true, data: report })
+  } catch (error) {
+    console.error('Get meeting review report error:', error)
+    res.status(500).json({ success: false, error: '获取复盘报表失败' })
   }
 })
 

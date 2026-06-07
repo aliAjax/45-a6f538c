@@ -23,6 +23,9 @@ import type {
   CalendarMonthData,
   ReminderGroups,
   MeetingReviewStats,
+  MeetingReviewDetail,
+  MeetingReviewReport,
+  MeetingReviewFilter,
   ParseMeetingResponse,
   BatchUpdateTaskRequest,
   BatchUpdateTaskResponse,
@@ -58,6 +61,8 @@ interface AppState {
   reminderGroups: ReminderGroups | null
   meetingReviewList: MeetingReviewStats[]
   meetingReviewTotal: number
+  meetingReviewDetail: MeetingReviewDetail | null
+  meetingReviewReport: MeetingReviewReport | null
   departmentWorkbench: DepartmentWorkbenchData | null
   departmentRiskStats: DepartmentRiskStats[]
   departmentRiskDetail: DepartmentRiskDetail | null
@@ -101,7 +106,9 @@ interface AppState {
   fetchTemplateVersionDetail: (templateId: number, versionId: number) => Promise<TemplateVersion | null>
   restoreTemplateVersion: (templateId: number, versionId: number) => Promise<MeetingTemplate>
   fetchReminders: () => Promise<void>
-  fetchMeetingReviewStats: (page?: number, pageSize?: number, startDate?: string, endDate?: string, search?: string) => Promise<void>
+  fetchMeetingReviewStats: (page?: number, pageSize?: number, filter?: MeetingReviewFilter) => Promise<void>
+  fetchMeetingReviewDetail: (meetingId: number) => Promise<MeetingReviewDetail | null>
+  fetchMeetingReviewReport: (filter?: MeetingReviewFilter) => Promise<MeetingReviewReport | null>
   parseMeetingText: (text: string) => Promise<ParseMeetingResponse>
   checkDuplicates: (meetings: DuplicateCheckRequest['meetings']) => Promise<DuplicateCheckResponse>
   appendTasksToMeeting: (meetingId: number, tasks: AppendTasksRequest['tasks']) => Promise<Task[]>
@@ -126,6 +133,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   reminderGroups: null,
   meetingReviewList: [],
   meetingReviewTotal: 0,
+  meetingReviewDetail: null,
+  meetingReviewReport: null,
   departmentWorkbench: null,
   departmentRiskStats: [],
   departmentRiskDetail: null,
@@ -610,22 +619,59 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  fetchMeetingReviewStats: async (page = 1, pageSize = 10, startDate?, endDate?, search?) => {
+  fetchMeetingReviewStats: async (page = 1, pageSize = 10, filter?) => {
     set({ loading: true, error: null })
     try {
       const params = new URLSearchParams({
         page: String(page),
         pageSize: String(pageSize),
       })
-      if (startDate) params.append('startDate', startDate)
-      if (endDate) params.append('endDate', endDate)
-      if (search) params.append('search', search)
+      if (filter?.startDate) params.append('startDate', filter.startDate)
+      if (filter?.endDate) params.append('endDate', filter.endDate)
+      if (filter?.department) params.append('department', filter.department)
+      if (filter?.status) params.append('status', filter.status)
+      if (filter?.overdueOnly) params.append('overdueOnly', 'true')
+      if (filter?.supervisingOnly) params.append('supervisingOnly', 'true')
+      if (filter?.search) params.append('search', filter.search)
       const result = await api.get<{ list: MeetingReviewStats[]; total: number }>(
         `/meetings/review/stats?${params}`
       )
       set({ meetingReviewList: result.list, meetingReviewTotal: result.total, loading: false })
     } catch (error) {
       set({ error: getErrorMessage(error), loading: false })
+    }
+  },
+
+  fetchMeetingReviewDetail: async (meetingId: number) => {
+    set({ loading: true, error: null })
+    try {
+      const detail = await api.get<MeetingReviewDetail>(`/meetings/review/detail/${meetingId}`)
+      set({ meetingReviewDetail: detail, loading: false })
+      return detail
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      return null
+    }
+  },
+
+  fetchMeetingReviewReport: async (filter?) => {
+    set({ loading: true, error: null })
+    try {
+      const params = new URLSearchParams()
+      if (filter?.startDate) params.append('startDate', filter.startDate)
+      if (filter?.endDate) params.append('endDate', filter.endDate)
+      if (filter?.department) params.append('department', filter.department)
+      if (filter?.status) params.append('status', filter.status)
+      if (filter?.overdueOnly) params.append('overdueOnly', 'true')
+      if (filter?.supervisingOnly) params.append('supervisingOnly', 'true')
+      const report = await api.get<MeetingReviewReport>(
+        `/meetings/review/report?${params.toString() ? params.toString() : ''}`
+      )
+      set({ meetingReviewReport: report, loading: false })
+      return report
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      return null
     }
   },
 
