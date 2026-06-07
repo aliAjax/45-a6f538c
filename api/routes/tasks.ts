@@ -613,8 +613,6 @@ router.patch('/batch/update', (req: Request, res: Response) => {
     })
 
     const allPrereqMap = new Map<number, number[]>()
-    const allBlockingMap = new Map<number, number[]>()
-
     const depRows = db.prepare(`
       SELECT task_id, prerequisite_task_id
       FROM task_dependencies
@@ -629,44 +627,21 @@ router.patch('/batch/update', (req: Request, res: Response) => {
       const prereqs = allPrereqMap.get(row.task_id) || []
       prereqs.push(row.prerequisite_task_id)
       allPrereqMap.set(row.task_id, prereqs)
-
-      const blocking = allBlockingMap.get(row.prerequisite_task_id) || []
-      blocking.push(row.task_id)
-      allBlockingMap.set(row.prerequisite_task_id, blocking)
     })
-
-    function isTaskBlocked(taskId: number, completingSet: Set<number>): boolean {
-      const prereqs = allPrereqMap.get(taskId) || []
-      for (const prereqId of prereqs) {
-        const prereqRow = taskRows.get(prereqId)
-        const prereqUpdate = updateMap.get(prereqId)
-        const willBeCompleted = prereqUpdate?.status === 'completed'
-        const isCompleted = prereqRow?.status === 'completed'
-        if (!isCompleted && !willBeCompleted) {
-          return true
-        }
-        if (!prereqRow && !completingSet.has(prereqId)) {
-          const actualRow = db.prepare('SELECT status FROM tasks WHERE id = ?').get(prereqId) as { status: string } | undefined
-          if (actualRow && actualRow.status !== 'completed') {
-            return true
-          }
-        }
-      }
-      return false
-    }
 
     const processed = new Set<number>()
     const successIds = new Set<number>()
+    const getTaskStatus = db.prepare('SELECT status FROM tasks WHERE id = ?')
 
     function isTaskBlockedForCompletion(taskId: number): { blocked: boolean; uncompletedCount: number } {
       const prereqs = allPrereqMap.get(taskId) || []
       let uncompletedCount = 0
 
       for (const prereqId of prereqs) {
-        const prereqRow = taskRows.get(prereqId)
-        const prereqUpdate = updateMap.get(prereqId)
+        const prereqStatus = taskRows.get(prereqId)?.status
+          ?? (getTaskStatus.get(prereqId) as { status: string } | undefined)?.status
 
-        const isAlreadyCompleted = prereqRow?.status === 'completed'
+        const isAlreadyCompleted = prereqStatus === 'completed'
         const willBeCompletedInBatch = successIds.has(prereqId)
 
         if (!isAlreadyCompleted && !willBeCompletedInBatch) {
