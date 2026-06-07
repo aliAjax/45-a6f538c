@@ -9,32 +9,137 @@ import {
   Clock,
   ListChecks,
   Edit3,
+  Layers,
+  Search,
+  BellRing,
+  AlertTriangle,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import TaskUpdateModal from '../components/TaskUpdateModal'
 import BatchUpdateModal, { type BatchUpdateFormData } from '../components/BatchUpdateModal'
+import ViewSelector from '../components/ViewSelector'
 import StatusBadge from '../components/StatusBadge'
-import type { Task, CalendarDayTasks, BatchUpdateTaskResult } from '../../shared/types'
+import type { Task, CalendarDayTasks, BatchUpdateTaskResult, TaskFilter, TaskView } from '../../shared/types'
 import { cn } from '../lib/utils'
+import { useSearchParams } from 'react-router-dom'
 import { ApiError } from '../utils/api'
 
 const weekDays = ['日', '一', '二', '三', '四', '五', '六']
 
+const defaultFilter: TaskFilter = {
+  department: 'all',
+  status: 'all',
+  risk: '',
+  search: '',
+  startDate: '',
+  endDate: '',
+  overdueOnly: false,
+  dueSoonOnly: false,
+  supervisingOnly: false,
+}
+
+function getFilterFromParams(searchParams: URLSearchParams): TaskFilter {
+  return {
+    department: searchParams.get('department') || 'all',
+    status: searchParams.get('status') || 'all',
+    risk: searchParams.get('risk') || '',
+    search: searchParams.get('search') || '',
+    startDate: searchParams.get('startDate') || '',
+    endDate: searchParams.get('endDate') || '',
+    overdueOnly: searchParams.get('overdueOnly') === 'true',
+    dueSoonOnly: searchParams.get('dueSoonOnly') === 'true',
+    supervisingOnly: searchParams.get('supervisingOnly') === 'true',
+  }
+}
+
+function setFilterToParams(filter: TaskFilter, searchParams: URLSearchParams): URLSearchParams {
+  const params = new URLSearchParams(searchParams)
+
+  if (filter.department === 'all') {
+    params.delete('department')
+  } else {
+    params.set('department', filter.department)
+  }
+
+  if (filter.status === 'all') {
+    params.delete('status')
+  } else {
+    params.set('status', filter.status)
+  }
+
+  if (filter.risk) {
+    params.set('risk', filter.risk)
+  } else {
+    params.delete('risk')
+  }
+
+  if (filter.search) {
+    params.set('search', filter.search)
+  } else {
+    params.delete('search')
+  }
+
+  if (filter.startDate) {
+    params.set('startDate', filter.startDate)
+  } else {
+    params.delete('startDate')
+  }
+
+  if (filter.endDate) {
+    params.set('endDate', filter.endDate)
+  } else {
+    params.delete('endDate')
+  }
+
+  if (filter.overdueOnly) {
+    params.set('overdueOnly', 'true')
+  } else {
+    params.delete('overdueOnly')
+  }
+
+  if (filter.dueSoonOnly) {
+    params.set('dueSoonOnly', 'true')
+  } else {
+    params.delete('dueSoonOnly')
+  }
+
+  if (filter.supervisingOnly) {
+    params.set('supervisingOnly', 'true')
+  } else {
+    params.delete('supervisingOnly')
+  }
+
+  params.delete('view')
+
+  return params
+}
+
 export default function TaskCalendar() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const {
     calendarData,
     departments,
     allTaskDepartments,
+    taskViews,
+    currentViewId,
     fetchCalendarTasks,
     fetchDepartments,
     fetchDepartmentTaskStats,
+    fetchTaskViews,
     batchUpdateTasks,
+    setCurrentViewId,
+    createTaskView,
+    deleteTaskView,
   } = useAppStore()
 
   const today = new Date()
-  const [currentYear, setCurrentYear] = useState(today.getFullYear())
-  const [currentMonth, setCurrentMonth] = useState(today.getMonth() + 1)
-  const [selectedDepartment, setSelectedDepartment] = useState('all')
+  const urlYear = searchParams.get('year')
+  const urlMonth = searchParams.get('month')
+  const urlFilter = getFilterFromParams(searchParams)
+
+  const [currentYear, setCurrentYear] = useState(urlYear ? Number(urlYear) : today.getFullYear())
+  const [currentMonth, setCurrentMonth] = useState(urlMonth ? Number(urlMonth) : today.getMonth() + 1)
+  const [filter, setFilter] = useState<TaskFilter>(urlFilter)
   const [selectedDay, setSelectedDay] = useState<CalendarDayTasks | null>(null)
   const [showDayModal, setShowDayModal] = useState(false)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
@@ -46,42 +151,137 @@ export default function TaskCalendar() {
   const [batchLoading, setBatchLoading] = useState(false)
   const [batchResults, setBatchResults] = useState<BatchUpdateTaskResult[] | null>(null)
   const [batchError, setBatchError] = useState<string | null>(null)
+  const [showWarning, setShowWarning] = useState(false)
+  const [warningMessage, setWarningMessage] = useState('')
 
   useEffect(() => {
     fetchDepartments()
     fetchDepartmentTaskStats()
-  }, [fetchDepartments, fetchDepartmentTaskStats])
+    fetchTaskViews()
+  }, [fetchDepartments, fetchDepartmentTaskStats, fetchTaskViews])
 
   useEffect(() => {
-    fetchCalendarTasks(currentYear, currentMonth, selectedDepartment)
-  }, [fetchCalendarTasks, currentYear, currentMonth, selectedDepartment])
+    const newFilter = getFilterFromParams(searchParams)
+    setFilter(newFilter)
 
-  const handlePrevMonth = () => {
-    if (currentMonth === 1) {
-      setCurrentYear(currentYear - 1)
-      setCurrentMonth(12)
+    const viewId = searchParams.get('view')
+    if (viewId) {
+      setCurrentViewId(Number(viewId))
     } else {
-      setCurrentMonth(currentMonth - 1)
+      setCurrentViewId(null)
+    }
+
+    const year = searchParams.get('year')
+    const month = searchParams.get('month')
+    if (year) setCurrentYear(Number(year))
+    if (month) setCurrentMonth(Number(month))
+  }, [searchParams, setCurrentViewId])
+
+  useEffect(() => {
+    const urlView = searchParams.get('view')
+    if (urlView) {
+      const view = taskViews.find((v) => v.id === Number(urlView))
+      if (view) {
+        checkViewValidity(view)
+      }
+    }
+  }, [searchParams.get('view'), taskViews, departments])
+
+  const checkViewValidity = (view: TaskView) => {
+    const invalidDepts: string[] = []
+    if (view.filter.department && view.filter.department !== 'all') {
+      if (!departments.includes(view.filter.department)) {
+        invalidDepts.push(view.filter.department)
+      }
+    }
+    if (invalidDepts.length > 0) {
+      setWarningMessage(`视图"${view.name}"包含已失效的筛选条件：${invalidDepts.join('、')}，视图仍可使用但结果可能不符合预期。`)
+      setShowWarning(true)
+    } else {
+      setShowWarning(false)
     }
   }
 
-  const handleNextMonth = () => {
-    if (currentMonth === 12) {
-      setCurrentYear(currentYear + 1)
-      setCurrentMonth(1)
-    } else {
-      setCurrentMonth(currentMonth + 1)
+  useEffect(() => {
+    fetchCalendarTasks(currentYear, currentMonth, filter.department, filter)
+  }, [fetchCalendarTasks, currentYear, currentMonth, filter])
+
+  const updateFilter = (updates: Partial<TaskFilter>) => {
+    const newFilter = { ...filter, ...updates }
+    setFilter(newFilter)
+    const params = setFilterToParams(newFilter, searchParams)
+    params.set('year', String(currentYear))
+    params.set('month', String(currentMonth))
+    setSearchParams(params)
+  }
+
+  const handleViewSelect = (view: TaskView) => {
+    const params = setFilterToParams(view.filter, searchParams)
+    params.set('view', String(view.id))
+    params.set('year', String(currentYear))
+    params.set('month', String(currentMonth))
+    setSearchParams(params)
+    setCurrentViewId(view.id)
+  }
+
+  const handleCreateView = (name: string, viewFilter: TaskFilter) => {
+    return createTaskView({ name, filter: viewFilter })
+  }
+
+  const handleDeleteView = (id: number) => {
+    return deleteTaskView(id)
+  }
+
+  const handlePrevMonth = () => {
+    let newYear = currentYear
+    let newMonth = currentMonth - 1
+    if (newMonth === 0) {
+      newYear = currentYear - 1
+      newMonth = 12
     }
+    setCurrentYear(newYear)
+    setCurrentMonth(newMonth)
+    const params = new URLSearchParams(searchParams)
+    params.set('year', String(newYear))
+    params.set('month', String(newMonth))
+    setSearchParams(params)
+  }
+
+  const handleNextMonth = () => {
+    let newYear = currentYear
+    let newMonth = currentMonth + 1
+    if (newMonth === 13) {
+      newYear = currentYear + 1
+      newMonth = 1
+    }
+    setCurrentYear(newYear)
+    setCurrentMonth(newMonth)
+    const params = new URLSearchParams(searchParams)
+    params.set('year', String(newYear))
+    params.set('month', String(newMonth))
+    setSearchParams(params)
   }
 
   const handleToday = () => {
     setCurrentYear(today.getFullYear())
     setCurrentMonth(today.getMonth() + 1)
+    const params = new URLSearchParams(searchParams)
+    params.set('year', String(today.getFullYear()))
+    params.set('month', String(today.getMonth() + 1))
+    setSearchParams(params)
   }
 
   const handleDepartmentChange = (dept: string) => {
-    setSelectedDepartment(dept)
     setShowDeptDropdown(false)
+    updateFilter({ department: dept })
+  }
+
+  const handleSearchChange = (search: string) => {
+    updateFilter({ search })
+  }
+
+  const handleToggleSupervising = () => {
+    updateFilter({ supervisingOnly: !filter.supervisingOnly })
   }
 
   const handleDayClick = (day: CalendarDayTasks) => {
@@ -90,7 +290,7 @@ export default function TaskCalendar() {
   }
 
   const handleTaskUpdated = () => {
-    fetchCalendarTasks(currentYear, currentMonth, selectedDepartment)
+    fetchCalendarTasks(currentYear, currentMonth, filter.department, filter)
   }
 
   const allCalendarTasks = useMemo(() => {
@@ -148,7 +348,7 @@ export default function TaskCalendar() {
           setShowBatchModal(false)
           setSelectedTaskIds(new Set())
           setSelectMode(false)
-          fetchCalendarTasks(currentYear, currentMonth, selectedDepartment)
+          fetchCalendarTasks(currentYear, currentMonth, filter.department, filter)
         }, 1500)
       }
     } catch (err) {
@@ -164,7 +364,7 @@ export default function TaskCalendar() {
     if (batchLoading) return
     setShowBatchModal(false)
     if (batchResults) {
-      fetchCalendarTasks(currentYear, currentMonth, selectedDepartment)
+      fetchCalendarTasks(currentYear, currentMonth, filter.department, filter)
       setBatchResults(null)
     }
   }
@@ -258,6 +458,21 @@ export default function TaskCalendar() {
         </p>
       </div>
 
+      {showWarning && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm text-amber-800">{warningMessage}</p>
+          </div>
+          <button
+            onClick={() => setShowWarning(false)}
+            className="text-amber-500 hover:text-amber-700"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl border border-slate-200 p-4 md:p-6">
         <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
           <div className="flex items-center gap-2">
@@ -289,7 +504,40 @@ export default function TaskCalendar() {
             </button>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <ViewSelector
+              currentFilter={filter}
+              onViewSelect={handleViewSelect}
+              onCreateView={handleCreateView}
+              onDeleteView={handleDeleteView}
+              currentViewId={currentViewId}
+              showSaveButton={true}
+            />
+
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={filter.search}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                placeholder="搜索..."
+                className="w-40 pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              />
+            </div>
+
+            <button
+              onClick={handleToggleSupervising}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-medium transition-all',
+                filter.supervisingOnly
+                  ? 'bg-rose-100 text-rose-700'
+                  : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
+              )}
+            >
+              <BellRing className="w-4 h-4" />
+              仅督办
+            </button>
+
             {selectMode ? (
               <div className="flex items-center gap-3">
                 <span className="text-sm text-slate-600">
@@ -334,9 +582,9 @@ export default function TaskCalendar() {
               >
                 <Building2 className="w-4 h-4 text-slate-500" />
                 <span className="text-slate-700">
-                  {selectedDepartment === 'all'
+                  {filter.department === 'all'
                     ? '全部科室'
-                    : selectedDepartment}
+                    : filter.department}
                 </span>
                 <ChevronDown className="w-4 h-4 text-slate-400" />
               </button>
@@ -354,7 +602,7 @@ export default function TaskCalendar() {
                         onClick={() => handleDepartmentChange(dept)}
                         className={cn(
                           'w-full px-4 py-2.5 text-left text-sm transition-colors',
-                          selectedDepartment === dept
+                          filter.department === dept
                             ? 'bg-primary-50 text-primary-700 font-medium'
                             : isDeptActive(dept)
                             ? 'text-slate-700 hover:bg-slate-50'

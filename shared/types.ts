@@ -460,3 +460,41 @@ export interface BatchImportResponse {
   failCount: number
   results: BatchImportResultItem[]
 }
+
+export interface TaskFilter {
+  department: string
+  status: string
+  risk: string
+  search: string
+  startDate: string
+  endDate: string
+  overdueOnly: boolean
+  dueSoonOnly: boolean
+  supervisingOnly: boolean
+}
+
+export interface TaskView {
+  id: number
+  name: string
+  filter: TaskFilter
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateTaskViewRequest {
+  name: string
+  filter: TaskFilter
+}
+
+export interface UpdateTaskViewRequest {
+  name?: string
+  filter?: TaskFilter
+  sortOrder?: number
+}
+
+export interface TaskViewValidationResult {
+  isValid: boolean
+  invalidDepartments: string[]
+  message?: string
+}

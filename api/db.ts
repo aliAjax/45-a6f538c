@@ -160,6 +160,17 @@ function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_task_dependencies_task_id ON task_dependencies(task_id);
     CREATE INDEX IF NOT EXISTS idx_task_dependencies_prerequisite_task_id ON task_dependencies(prerequisite_task_id);
+
+    CREATE TABLE IF NOT EXISTS task_views (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      filter_json TEXT NOT NULL DEFAULT '{}',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now', 'localtime')),
+      updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_task_views_sort_order ON task_views(sort_order);
   `)
 
   const meetingCount = db.prepare('SELECT COUNT(*) as count FROM meetings').get() as { count: number }

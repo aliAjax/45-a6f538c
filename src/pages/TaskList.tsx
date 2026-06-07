@@ -8,12 +8,18 @@ import {
   Edit3,
   ListChecks,
   X,
+  Search,
+  Calendar as CalendarIcon,
+  AlertTriangle,
+  Clock,
+  BellRing,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import TaskCard from '../components/TaskCard'
 import TaskUpdateModal from '../components/TaskUpdateModal'
 import BatchUpdateModal, { type BatchUpdateFormData } from '../components/BatchUpdateModal'
-import type { Task, RiskLevel, BatchUpdateTaskResult } from '../../shared/types'
+import ViewSelector from '../components/ViewSelector'
+import type { Task, RiskLevel, BatchUpdateTaskResult, TaskFilter, TaskView } from '../../shared/types'
 import { cn } from '../lib/utils'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { ApiError } from '../utils/api'
@@ -47,6 +53,94 @@ function getRiskLevelConfig(level: RiskLevel) {
   }
 }
 
+const defaultFilter: TaskFilter = {
+  department: 'all',
+  status: 'all',
+  risk: '',
+  search: '',
+  startDate: '',
+  endDate: '',
+  overdueOnly: false,
+  dueSoonOnly: false,
+  supervisingOnly: false,
+}
+
+function getFilterFromParams(searchParams: URLSearchParams): TaskFilter {
+  return {
+    department: searchParams.get('department') || 'all',
+    status: searchParams.get('status') || 'all',
+    risk: searchParams.get('risk') || '',
+    search: searchParams.get('search') || '',
+    startDate: searchParams.get('startDate') || '',
+    endDate: searchParams.get('endDate') || '',
+    overdueOnly: searchParams.get('overdueOnly') === 'true',
+    dueSoonOnly: searchParams.get('dueSoonOnly') === 'true',
+    supervisingOnly: searchParams.get('supervisingOnly') === 'true',
+  }
+}
+
+function setFilterToParams(filter: TaskFilter, searchParams: URLSearchParams): URLSearchParams {
+  const params = new URLSearchParams(searchParams)
+
+  if (filter.department === 'all') {
+    params.delete('department')
+  } else {
+    params.set('department', filter.department)
+  }
+
+  if (filter.status === 'all') {
+    params.delete('status')
+  } else {
+    params.set('status', filter.status)
+  }
+
+  if (filter.risk) {
+    params.set('risk', filter.risk)
+  } else {
+    params.delete('risk')
+  }
+
+  if (filter.search) {
+    params.set('search', filter.search)
+  } else {
+    params.delete('search')
+  }
+
+  if (filter.startDate) {
+    params.set('startDate', filter.startDate)
+  } else {
+    params.delete('startDate')
+  }
+
+  if (filter.endDate) {
+    params.set('endDate', filter.endDate)
+  } else {
+    params.delete('endDate')
+  }
+
+  if (filter.overdueOnly) {
+    params.set('overdueOnly', 'true')
+  } else {
+    params.delete('overdueOnly')
+  }
+
+  if (filter.dueSoonOnly) {
+    params.set('dueSoonOnly', 'true')
+  } else {
+    params.delete('dueSoonOnly')
+  }
+
+  if (filter.supervisingOnly) {
+    params.set('supervisingOnly', 'true')
+  } else {
+    params.delete('supervisingOnly')
+  }
+
+  params.delete('view')
+
+  return params
+}
+
 export default function TaskList() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -56,20 +150,23 @@ export default function TaskList() {
     departments,
     allTaskDepartments,
     departmentRiskStats,
+    taskViews,
+    currentViewId,
     fetchTasks,
     fetchDepartments,
     fetchDepartmentTaskStats,
     fetchDepartmentRiskStats,
     batchUpdateTasks,
+    setCurrentViewId,
+    createTaskView,
+    deleteTaskView,
+    fetchTaskViews,
   } = useAppStore()
 
-  const urlDepartment = searchParams.get('department') || 'all'
-  const urlStatus = searchParams.get('status') || 'all'
-  const urlRisk = searchParams.get('risk') || ''
+  const urlView = searchParams.get('view')
+  const urlFilter = getFilterFromParams(searchParams)
 
-  const [selectedDepartment, setSelectedDepartment] = useState(urlDepartment)
-  const [selectedStatus, setSelectedStatus] = useState(urlStatus)
-  const [selectedRisk, setSelectedRisk] = useState(urlRisk)
+  const [filter, setFilter] = useState<TaskFilter>(urlFilter)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [showDeptDropdown, setShowDeptDropdown] = useState(false)
@@ -79,56 +176,137 @@ export default function TaskList() {
   const [batchLoading, setBatchLoading] = useState(false)
   const [batchResults, setBatchResults] = useState<BatchUpdateTaskResult[] | null>(null)
   const [batchError, setBatchError] = useState<string | null>(null)
+  const [showWarning, setShowWarning] = useState(false)
+  const [warningMessage, setWarningMessage] = useState('')
 
   useEffect(() => {
     fetchDepartments()
     fetchDepartmentTaskStats()
     fetchDepartmentRiskStats()
-  }, [fetchDepartments, fetchDepartmentTaskStats, fetchDepartmentRiskStats])
+    fetchTaskViews()
+  }, [fetchDepartments, fetchDepartmentTaskStats, fetchDepartmentRiskStats, fetchTaskViews])
 
   useEffect(() => {
-    if (urlDepartment !== selectedDepartment) {
-      setSelectedDepartment(urlDepartment)
+    const newFilter = getFilterFromParams(searchParams)
+    setFilter(newFilter)
+
+    const viewId = searchParams.get('view')
+    if (viewId) {
+      setCurrentViewId(Number(viewId))
+    } else {
+      setCurrentViewId(null)
     }
-    if (urlStatus !== selectedStatus) {
-      setSelectedStatus(urlStatus)
-    }
-    if (urlRisk !== selectedRisk) {
-      setSelectedRisk(urlRisk)
-    }
-  }, [urlDepartment, urlStatus, urlRisk])
+  }, [searchParams, setCurrentViewId])
 
   useEffect(() => {
-    fetchTasks(selectedDepartment, selectedStatus, 1, 50, selectedRisk)
-  }, [fetchTasks, selectedDepartment, selectedStatus, selectedRisk])
+    if (urlView) {
+      const view = taskViews.find((v) => v.id === Number(urlView))
+      if (view) {
+        checkViewValidity(view)
+      }
+    }
+  }, [urlView, taskViews, departments])
+
+  const checkViewValidity = (view: TaskView) => {
+    const invalidDepts: string[] = []
+    if (view.filter.department && view.filter.department !== 'all') {
+      if (!departments.includes(view.filter.department)) {
+        invalidDepts.push(view.filter.department)
+      }
+    }
+    if (invalidDepts.length > 0) {
+      setWarningMessage(`视图"${view.name}"包含已失效的筛选条件：${invalidDepts.join('、')}，视图仍可使用但结果可能不符合预期。`)
+      setShowWarning(true)
+    } else {
+      setShowWarning(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchTasks('all', 'all', 1, 50, '', filter)
+  }, [fetchTasks, filter])
+
+  const updateFilter = (updates: Partial<TaskFilter>) => {
+    const newFilter = { ...filter, ...updates }
+    setFilter(newFilter)
+    const params = setFilterToParams(newFilter, searchParams)
+    setSearchParams(params)
+  }
+
+  const handleViewSelect = (view: TaskView) => {
+    const params = setFilterToParams(view.filter, searchParams)
+    params.set('view', String(view.id))
+    setSearchParams(params)
+    setCurrentViewId(view.id)
+  }
+
+  const handleCreateView = (name: string, viewFilter: TaskFilter) => {
+    return createTaskView({ name, filter: viewFilter })
+  }
+
+  const handleDeleteView = (id: number) => {
+    return deleteTaskView(id)
+  }
 
   const handleDepartmentChange = (dept: string) => {
-    setSelectedDepartment(dept)
     setShowDeptDropdown(false)
-    const params = new URLSearchParams(searchParams)
-    if (dept === 'all') {
-      params.delete('department')
-    } else {
-      params.set('department', dept)
-    }
-    setSearchParams(params)
+    updateFilter({ department: dept })
   }
 
   const handleStatusChange = (status: string) => {
-    setSelectedStatus(status)
-    const params = new URLSearchParams(searchParams)
-    if (status === 'all') {
-      params.delete('status')
-    } else {
-      params.set('status', status)
-    }
-    params.delete('risk')
-    setSelectedRisk('')
-    setSearchParams(params)
+    updateFilter({ status, risk: '' })
   }
 
+  const handleSearchChange = (search: string) => {
+    updateFilter({ search })
+  }
+
+  const handleStartDateChange = (startDate: string) => {
+    updateFilter({ startDate })
+  }
+
+  const handleEndDateChange = (endDate: string) => {
+    updateFilter({ endDate })
+  }
+
+  const handleToggleOverdue = () => {
+    updateFilter({ overdueOnly: !filter.overdueOnly, risk: '' })
+  }
+
+  const handleToggleDueSoon = () => {
+    updateFilter({ dueSoonOnly: !filter.dueSoonOnly, risk: '' })
+  }
+
+  const handleToggleSupervising = () => {
+    updateFilter({ supervisingOnly: !filter.supervisingOnly, risk: '' })
+  }
+
+  const clearDateRange = () => {
+    updateFilter({ startDate: '', endDate: '' })
+  }
+
+  const clearAllFilters = () => {
+    setFilter(defaultFilter)
+    setSearchParams(new URLSearchParams())
+    setCurrentViewId(null)
+  }
+
+  const hasActiveFilters = useMemo(() => {
+    return (
+      filter.department !== 'all' ||
+      filter.status !== 'all' ||
+      filter.search !== '' ||
+      filter.startDate !== '' ||
+      filter.endDate !== '' ||
+      filter.overdueOnly ||
+      filter.dueSoonOnly ||
+      filter.supervisingOnly ||
+      filter.risk !== ''
+    )
+  }, [filter])
+
   const handleUpdated = () => {
-    fetchTasks(selectedDepartment, selectedStatus, 1, 50, selectedRisk)
+    fetchTasks('all', 'all', 1, 50, '', filter)
   }
 
   const selectableTasks = useMemo(() => {
@@ -199,7 +377,7 @@ export default function TaskList() {
           setShowBatchModal(false)
           setSelectedTaskIds(new Set())
           setSelectMode(false)
-          fetchTasks(selectedDepartment, selectedStatus, 1, 50, selectedRisk)
+          fetchTasks('all', 'all', 1, 50, '', filter)
         }, 1500)
       }
     } catch (err) {
@@ -215,7 +393,7 @@ export default function TaskList() {
     if (batchLoading) return
     setShowBatchModal(false)
     if (batchResults) {
-      fetchTasks(selectedDepartment, selectedStatus, 1, 50, selectedRisk)
+      fetchTasks('all', 'all', 1, 50, '', filter)
       setBatchResults(null)
     }
   }
@@ -244,19 +422,29 @@ export default function TaskList() {
   }
 
   const clearRiskFilter = () => {
-    const params = new URLSearchParams(searchParams)
-    params.delete('risk')
-    setSelectedRisk('')
-    setSearchParams(params)
+    updateFilter({ risk: '' })
   }
 
   const goRiskWorkbench = () => {
     const params = new URLSearchParams({ tab: 'risk' })
-    if (selectedDepartment !== 'all') {
-      params.set('department', selectedDepartment)
+    if (filter.department !== 'all') {
+      params.set('department', filter.department)
     }
     navigate(`/workbench?${params.toString()}`)
   }
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0
+    if (filter.department !== 'all') count++
+    if (filter.status !== 'all') count++
+    if (filter.search) count++
+    if (filter.startDate || filter.endDate) count++
+    if (filter.overdueOnly) count++
+    if (filter.dueSoonOnly) count++
+    if (filter.supervisingOnly) count++
+    if (filter.risk) count++
+    return count
+  }, [filter])
 
   return (
     <div className="space-y-6">
@@ -267,12 +455,35 @@ export default function TaskList() {
         </p>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-4">
+      {showWarning && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm text-amber-800">{warningMessage}</p>
+          </div>
+          <button
+            onClick={() => setShowWarning(false)}
+            className="text-amber-500 hover:text-amber-700"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
             <Filter className="w-4.5 h-4.5 text-slate-400" />
             <span className="text-sm font-medium text-slate-700">筛选：</span>
           </div>
+
+          <ViewSelector
+            currentFilter={filter}
+            onViewSelect={handleViewSelect}
+            onCreateView={handleCreateView}
+            onDeleteView={handleDeleteView}
+            currentViewId={currentViewId}
+          />
 
           <div className="relative">
             <button
@@ -281,9 +492,9 @@ export default function TaskList() {
             >
               <Building2 className="w-4 h-4 text-slate-500" />
               <span className="text-slate-700">
-                {selectedDepartment === 'all'
+                {filter.department === 'all'
                   ? '全部科室'
-                  : selectedDepartment}
+                  : filter.department}
               </span>
               <ChevronDown className="w-4 h-4 text-slate-400" />
             </button>
@@ -301,7 +512,7 @@ export default function TaskList() {
                       onClick={() => handleDepartmentChange(dept)}
                       className={cn(
                         'w-full px-4 py-2.5 text-left text-sm transition-colors',
-                        selectedDepartment === dept
+                        filter.department === dept
                           ? 'bg-primary-50 text-primary-700 font-medium'
                           : isDeptActive(dept)
                           ? 'text-slate-700 hover:bg-slate-50'
@@ -330,7 +541,7 @@ export default function TaskList() {
                 onClick={() => handleStatusChange(option.value)}
                 className={cn(
                   'px-3.5 py-1.5 text-sm font-medium rounded-lg transition-all',
-                  selectedStatus === option.value
+                  filter.status === option.value
                     ? 'bg-white text-primary-700 shadow-sm'
                     : 'text-slate-600 hover:text-slate-800'
                 )}
@@ -340,7 +551,33 @@ export default function TaskList() {
             ))}
           </div>
 
+          <div className="relative flex-1 max-w-xs">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={filter.search}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              placeholder="搜索事项内容或会议..."
+              className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            />
+          </div>
+
           <div className="ml-auto flex items-center gap-4">
+            {hasActiveFilters && (
+              <button
+                onClick={clearAllFilters}
+                className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 transition-colors"
+              >
+                <X className="w-4 h-4" />
+                清除筛选
+                {activeFilterCount > 0 && (
+                  <span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded-full text-xs">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+            )}
+
             <button
               onClick={goRiskWorkbench}
               className="inline-flex items-center gap-1.5 text-sm font-medium text-rose-600 hover:text-rose-700 transition-colors"
@@ -374,9 +611,79 @@ export default function TaskList() {
           </div>
         </div>
 
-        {selectedRisk && riskFilterLabels[selectedRisk] && (
-          <div className="mt-3 inline-flex items-center gap-2 rounded-lg bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700">
-            <span>风险筛选：{riskFilterLabels[selectedRisk]}</span>
+        <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-100">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-slate-500">快捷筛选：</span>
+            <button
+              onClick={handleToggleOverdue}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+                filter.overdueOnly
+                  ? 'bg-red-100 text-red-700'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              )}
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              仅逾期
+            </button>
+            <button
+              onClick={handleToggleDueSoon}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+                filter.dueSoonOnly
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              )}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              仅临期
+            </button>
+            <button
+              onClick={handleToggleSupervising}
+              className={cn(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+                filter.supervisingOnly
+                  ? 'bg-rose-100 text-rose-700'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              )}
+            >
+              <BellRing className="w-3.5 h-3.5" />
+              仅督办
+            </button>
+          </div>
+
+          <div className="h-4 w-px bg-slate-200" />
+
+          <div className="flex items-center gap-2">
+            <CalendarIcon className="w-4 h-4 text-slate-400" />
+            <span className="text-xs font-medium text-slate-500">日期范围：</span>
+            <input
+              type="date"
+              value={filter.startDate}
+              onChange={(e) => handleStartDateChange(e.target.value)}
+              className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            />
+            <span className="text-slate-400 text-xs">至</span>
+            <input
+              type="date"
+              value={filter.endDate}
+              onChange={(e) => handleEndDateChange(e.target.value)}
+              className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+            />
+            {(filter.startDate || filter.endDate) && (
+              <button
+                onClick={clearDateRange}
+                className="text-xs text-slate-500 hover:text-slate-700 transition-colors"
+              >
+                清除
+              </button>
+            )}
+          </div>
+        </div>
+
+        {filter.risk && riskFilterLabels[filter.risk] && (
+          <div className="inline-flex items-center gap-2 rounded-lg bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700">
+            <span>风险筛选：{riskFilterLabels[filter.risk]}</span>
             <button
               onClick={clearRiskFilter}
               className="text-rose-500 hover:text-rose-700"
@@ -403,7 +710,7 @@ export default function TaskList() {
                 onClick={() => handleDepartmentChange(dept)}
                 className={cn(
                   'px-4 py-2 rounded-xl text-sm font-medium transition-all relative',
-                  selectedDepartment === dept
+                  filter.department === dept
                     ? 'bg-primary-600 text-white shadow-sm shadow-primary-200'
                     : active
                     ? 'bg-white border border-slate-200 text-slate-700 hover:border-slate-300'
@@ -415,7 +722,7 @@ export default function TaskList() {
                     <span
                       className={cn(
                         'w-2 h-2 rounded-full',
-                        selectedDepartment === dept ? 'bg-white' : riskConfig.dotClass
+                        filter.department === dept ? 'bg-white' : riskConfig.dotClass
                       )}
                     />
                   )}
@@ -426,7 +733,7 @@ export default function TaskList() {
                   <span
                     className={cn(
                       'ml-1 px-2 py-0.5 rounded-full text-xs',
-                      selectedDepartment === dept
+                      filter.department === dept
                         ? 'bg-white/20 text-white'
                         : 'bg-slate-100 text-slate-600'
                     )}

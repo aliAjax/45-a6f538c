@@ -238,7 +238,7 @@ function getThisWeekRange(): { start: string; end: string } {
 
 router.get('/', (req: Request, res: Response) => {
   try {
-    const { department, status, risk, page = '1', pageSize = '20' } = req.query
+    const { department, status, risk, search, startDate, endDate, overdueOnly, dueSoonOnly, supervisingOnly, page = '1', pageSize = '20' } = req.query
     const today = new Date().toISOString().split('T')[0]
     const { start: dueSoonStart, end: dueSoonEnd } = getDueSoonRange()
     const longNoUpdateDate = getLongNoUpdateDate()
@@ -249,6 +249,40 @@ router.get('/', (req: Request, res: Response) => {
     if (department && department !== 'all') {
       whereClause += ' AND t.department = ?'
       params.push(department as string)
+    }
+
+    if (search && typeof search === 'string' && search.trim()) {
+      whereClause += ' AND (t.content LIKE ? OR m.title LIKE ?)'
+      const searchTerm = `%${search.trim()}%`
+      params.push(searchTerm, searchTerm)
+    }
+
+    if (startDate && typeof startDate === 'string' && startDate.trim()) {
+      whereClause += ' AND date(t.deadline) >= date(?)'
+      params.push(startDate.trim())
+    }
+
+    if (endDate && typeof endDate === 'string' && endDate.trim()) {
+      whereClause += ' AND date(t.deadline) <= date(?)'
+      params.push(endDate.trim())
+    }
+
+    if (overdueOnly === 'true') {
+      whereClause += ' AND t.status != ? AND t.deadline < ?'
+      params.push('completed', today)
+    }
+
+    if (dueSoonOnly === 'true') {
+      whereClause += ' AND t.status != ? AND t.deadline >= ? AND t.deadline <= ?'
+      params.push('completed', dueSoonStart, dueSoonEnd)
+    }
+
+    if (supervisingOnly === 'true') {
+      whereClause += ` AND t.status != ? AND EXISTS (
+        SELECT 1 FROM task_supervisions ts
+        WHERE ts.task_id = t.id AND ts.status = 'active'
+      )`
+      params.push('completed')
     }
 
     if (risk === 'overdue') {
@@ -375,7 +409,7 @@ router.get('/this-week', (_req: Request, res: Response) => {
 
 router.get('/calendar', (req: Request, res: Response) => {
   try {
-    const { year, month, department = 'all' } = req.query
+    const { year, month, department = 'all', search, supervisingOnly, status } = req.query
 
     if (!year || !month) {
       return res.status(400).json({ success: false, error: '年份和月份不能为空' })
@@ -388,12 +422,32 @@ router.get('/calendar', (req: Request, res: Response) => {
     const startDate = `${y}-${String(m).padStart(2, '0')}-01`
     const endDate = `${y}-${String(m).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`
 
-    let whereClause = `WHERE t.status != 'completed' AND date(t.deadline) >= date(?) AND date(t.deadline) <= date(?)`
+    let whereClause = `WHERE date(t.deadline) >= date(?) AND date(t.deadline) <= date(?)`
     const params: (string | number)[] = [startDate, endDate]
 
     if (department && department !== 'all') {
       whereClause += ' AND t.department = ?'
       params.push(department as string)
+    }
+
+    if (search && typeof search === 'string' && search.trim()) {
+      whereClause += ' AND (t.content LIKE ? OR m.title LIKE ?)'
+      const searchTerm = `%${search.trim()}%`
+      params.push(searchTerm, searchTerm)
+    }
+
+    if (supervisingOnly === 'true') {
+      whereClause += ` AND EXISTS (
+        SELECT 1 FROM task_supervisions ts
+        WHERE ts.task_id = t.id AND ts.status = 'active'
+      )`
+    }
+
+    if (status && status !== 'all') {
+      whereClause += ' AND t.status = ?'
+      params.push(status as string)
+    } else {
+      whereClause += ` AND t.status != 'completed'`
     }
 
     const rows = db.prepare(`

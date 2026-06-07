@@ -8,12 +8,15 @@ import {
   Building2,
   BellRing,
   ShieldAlert,
+  Layers,
+  Search,
+  Calendar as CalendarIcon,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import StatCard from '../components/StatCard'
 import TaskCard from '../components/TaskCard'
 import TaskUpdateModal from '../components/TaskUpdateModal'
-import type { Task, RiskLevel } from '../../shared/types'
+import type { Task, RiskLevel, TaskView } from '../../shared/types'
 import { useNavigate } from 'react-router-dom'
 import { cn } from '../lib/utils'
 
@@ -46,6 +49,43 @@ function getRiskLevelConfig(level: RiskLevel) {
   }
 }
 
+function getViewDescription(view: TaskView): string {
+  const parts: string[] = []
+  const f = view.filter
+
+  if (f.department && f.department !== 'all') {
+    parts.push(f.department)
+  }
+
+  if (f.status && f.status !== 'all') {
+    const statusMap: Record<string, string> = {
+      pending: '待办理',
+      in_progress: '进行中',
+      completed: '已完成',
+    }
+    parts.push(statusMap[f.status] || f.status)
+  }
+
+  if (f.overdueOnly) parts.push('仅逾期')
+  if (f.dueSoonOnly) parts.push('仅临期')
+  if (f.supervisingOnly) parts.push('仅督办')
+
+  if (f.search) {
+    parts.push(`搜索"${f.search}"`)
+  }
+
+  if (f.startDate || f.endDate) {
+    const dateStr = [f.startDate, f.endDate].filter(Boolean).join(' 至 ')
+    parts.push(dateStr)
+  }
+
+  if (parts.length === 0) {
+    return '全部任务'
+  }
+
+  return parts.join(' · ')
+}
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const {
@@ -56,6 +96,7 @@ export default function Dashboard() {
     departmentTaskStats,
     departmentRiskStats,
     departments,
+    taskViews,
     fetchStats,
     fetchOverdueTasks,
     fetchThisWeekTasks,
@@ -63,6 +104,7 @@ export default function Dashboard() {
     fetchDepartmentTaskStats,
     fetchDepartmentRiskStats,
     fetchDepartments,
+    fetchTaskViews,
   } = useAppStore()
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
@@ -76,7 +118,8 @@ export default function Dashboard() {
     fetchDepartmentTaskStats()
     fetchDepartmentRiskStats()
     fetchDepartments()
-  }, [fetchStats, fetchOverdueTasks, fetchThisWeekTasks, fetchSupervisingTasks, fetchDepartmentTaskStats, fetchDepartmentRiskStats, fetchDepartments])
+    fetchTaskViews()
+  }, [fetchStats, fetchOverdueTasks, fetchThisWeekTasks, fetchSupervisingTasks, fetchDepartmentTaskStats, fetchDepartmentRiskStats, fetchDepartments, fetchTaskViews])
 
   const handleTaskClick = (task: Task) => {
     setSelectedTask(task)
@@ -129,6 +172,77 @@ export default function Dashboard() {
           iconBg="bg-white/20"
         />
       </div>
+
+      {taskViews.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-violet-50 flex items-center justify-center">
+                <Layers className="w-5 h-5 text-violet-600" />
+              </div>
+              <div>
+                <h2 className="font-semibold text-slate-800">我的视图</h2>
+                <p className="text-xs text-slate-500">
+                  快速切换常用筛选视图
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => navigate('/tasks')}
+              className="text-sm text-violet-600 hover:text-violet-700 font-medium flex items-center gap-1 transition-colors"
+            >
+              管理视图
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="p-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {taskViews.slice(0, 8).map((view) => {
+                const isInvalid = view.filter.department && view.filter.department !== 'all' && !departments.includes(view.filter.department)
+                return (
+                  <button
+                    key={view.id}
+                    onClick={() => navigate(`/tasks?view=${view.id}`)}
+                    className={cn(
+                      'p-4 rounded-xl border text-left transition-all group',
+                      isInvalid
+                        ? 'border-amber-200 bg-amber-50/30 hover:border-amber-300'
+                        : 'border-slate-200 hover:border-violet-300 hover:bg-violet-50/30'
+                    )}
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <div className={cn(
+                        'w-8 h-8 rounded-lg flex items-center justify-center',
+                        isInvalid ? 'bg-amber-100' : 'bg-violet-100'
+                      )}>
+                        <Layers className={cn(
+                          'w-4 h-4',
+                          isInvalid ? 'text-amber-600' : 'text-violet-600'
+                        )} />
+                      </div>
+                      {isInvalid && (
+                        <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">
+                          已失效
+                        </span>
+                      )}
+                    </div>
+                    <h3 className={cn(
+                      'text-sm font-medium mb-1 line-clamp-1',
+                      isInvalid ? 'text-amber-800' : 'text-slate-800'
+                    )}>
+                      {view.name}
+                    </h3>
+                    <p className="text-xs text-slate-500 line-clamp-2">
+                      {getViewDescription(view)}
+                    </p>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">

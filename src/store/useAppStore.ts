@@ -35,6 +35,11 @@ import type {
   AppendTasksRequest,
   BatchImportRequest,
   BatchImportResponse,
+  TaskView,
+  TaskFilter,
+  CreateTaskViewRequest,
+  UpdateTaskViewRequest,
+  TaskViewValidationResult,
 } from '../../shared/types'
 import api from '../utils/api'
 
@@ -67,6 +72,8 @@ interface AppState {
   departmentRiskStats: DepartmentRiskStats[]
   departmentRiskDetail: DepartmentRiskDetail | null
   supervisingTasks: Task[]
+  taskViews: TaskView[]
+  currentViewId: number | null
   loading: boolean
   error: string | null
 
@@ -74,10 +81,10 @@ interface AppState {
   fetchMeetings: (page?: number, pageSize?: number, search?: string) => Promise<void>
   fetchMeetingDetail: (id: number) => Promise<Meeting | null>
   createMeeting: (data: CreateMeetingRequest) => Promise<Meeting>
-  fetchTasks: (department?: string, status?: string, page?: number, pageSize?: number, risk?: string) => Promise<void>
+  fetchTasks: (department?: string, status?: string, page?: number, pageSize?: number, risk?: string, filter?: Partial<TaskFilter>) => Promise<void>
   fetchOverdueTasks: () => Promise<void>
   fetchThisWeekTasks: () => Promise<void>
-  fetchCalendarTasks: (year: number, month: number, department?: string) => Promise<void>
+  fetchCalendarTasks: (year: number, month: number, department?: string, filter?: Partial<TaskFilter>) => Promise<void>
   fetchDepartments: () => Promise<void>
   fetchAllDepartments: () => Promise<void>
   fetchDepartmentTaskStats: () => Promise<void>
@@ -113,6 +120,13 @@ interface AppState {
   checkDuplicates: (meetings: DuplicateCheckRequest['meetings']) => Promise<DuplicateCheckResponse>
   appendTasksToMeeting: (meetingId: number, tasks: AppendTasksRequest['tasks']) => Promise<Task[]>
   batchImportMeetings: (request: BatchImportRequest) => Promise<BatchImportResponse>
+  fetchTaskViews: () => Promise<void>
+  createTaskView: (data: CreateTaskViewRequest) => Promise<TaskView>
+  updateTaskView: (id: number, data: UpdateTaskViewRequest) => Promise<TaskView>
+  deleteTaskView: (id: number) => Promise<void>
+  reorderTaskViews: (orders: Array<{ id: number; sortOrder: number }>) => Promise<void>
+  validateTaskView: (id: number) => Promise<TaskViewValidationResult>
+  setCurrentViewId: (id: number | null) => void
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -139,6 +153,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   departmentRiskStats: [],
   departmentRiskDetail: null,
   supervisingTasks: [],
+  taskViews: [],
+  currentViewId: null,
   loading: false,
   error: null,
 
@@ -191,7 +207,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  fetchTasks: async (department = 'all', status = 'all', page = 1, pageSize = 20, risk = '') => {
+  fetchTasks: async (department = 'all', status = 'all', page = 1, pageSize = 20, risk = '', filter?) => {
     set({ loading: true, error: null })
     try {
       const params = new URLSearchParams({
@@ -202,6 +218,32 @@ export const useAppStore = create<AppState>((set, get) => ({
       })
       if (risk) {
         params.set('risk', risk)
+      }
+      if (filter) {
+        if (filter.department && filter.department !== 'all') {
+          params.set('department', filter.department)
+        }
+        if (filter.status && filter.status !== 'all') {
+          params.set('status', filter.status)
+        }
+        if (filter.search) {
+          params.set('search', filter.search)
+        }
+        if (filter.startDate) {
+          params.set('startDate', filter.startDate)
+        }
+        if (filter.endDate) {
+          params.set('endDate', filter.endDate)
+        }
+        if (filter.overdueOnly) {
+          params.set('overdueOnly', 'true')
+        }
+        if (filter.dueSoonOnly) {
+          params.set('dueSoonOnly', 'true')
+        }
+        if (filter.supervisingOnly) {
+          params.set('supervisingOnly', 'true')
+        }
       }
       const result = await api.get<{ list: Task[]; total: number }>(`/tasks?${params}`)
       set({ tasks: result.list, tasksTotal: result.total, loading: false })
@@ -230,7 +272,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  fetchCalendarTasks: async (year: number, month: number, department = 'all') => {
+  fetchCalendarTasks: async (year, month, department = 'all', filter?) => {
     set({ loading: true, error: null })
     try {
       const params = new URLSearchParams({
@@ -238,6 +280,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         month: String(month),
         department,
       })
+      if (filter) {
+        if (filter.search) {
+          params.set('search', filter.search)
+        }
+        if (filter.supervisingOnly) {
+          params.set('supervisingOnly', 'true')
+        }
+        if (filter.status && filter.status !== 'all') {
+          params.set('status', filter.status)
+        }
+      }
       const data = await api.get<CalendarMonthData>(`/tasks/calendar?${params}`)
       set({ calendarData: data, loading: false })
     } catch (error) {
@@ -727,5 +780,91 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ error: getErrorMessage(error), loading: false })
       throw error
     }
+  },
+
+  fetchTaskViews: async () => {
+    set({ loading: true, error: null })
+    try {
+      const views = await api.get<TaskView[]>('/views')
+      set({ taskViews: views, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+    }
+  },
+
+  createTaskView: async (data) => {
+    set({ loading: true, error: null })
+    try {
+      const view = await api.post<TaskView>('/views', data)
+      set((state) => {
+        const newViews = [...state.taskViews, view].sort(
+          (a, b) => a.sortOrder - b.sortOrder || a.id - b.id
+        )
+        return { taskViews: newViews, loading: false }
+      })
+      return view
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  updateTaskView: async (id, data) => {
+    set({ loading: true, error: null })
+    try {
+      const view = await api.put<TaskView>(`/views/${id}`, data)
+      set((state) => {
+        const newViews = state.taskViews
+          .map((v) => (v.id === id ? view : v))
+          .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id)
+        return { taskViews: newViews, loading: false }
+      })
+      return view
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  deleteTaskView: async (id) => {
+    set({ loading: true, error: null })
+    try {
+      await api.delete(`/views/${id}`)
+      set((state) => {
+        const newViews = state.taskViews.filter((v) => v.id !== id)
+        const newCurrentViewId = state.currentViewId === id ? null : state.currentViewId
+        return { taskViews: newViews, currentViewId: newCurrentViewId, loading: false }
+      })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  reorderTaskViews: async (orders) => {
+    set({ loading: true, error: null })
+    try {
+      await api.post('/views/reorder', { orders })
+      set({ loading: false })
+      const { fetchTaskViews } = get()
+      fetchTaskViews()
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  validateTaskView: async (id) => {
+    try {
+      const result = await api.get<TaskViewValidationResult>(`/views/${id}/validate`)
+      return result
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+  },
+
+  setCurrentViewId: (id) => {
+    set({ currentViewId: id })
   },
 }))
