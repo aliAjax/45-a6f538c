@@ -828,6 +828,15 @@ router.get('/risk/:department', (req: Request, res: Response) => {
     const completionRate = total > 0 ? Math.round((completed / total) * 1000) / 10 : 0
     const maxOverdueDays = maxOverdueRow.max_days || 0
 
+    const avgOverdueDays = overdueTasks.length > 0
+      ? Math.round(
+          overdueTasks.reduce((sum, task) => {
+            const days = Math.floor((new Date(today).getTime() - new Date(task.deadline).getTime()) / (1000 * 60 * 60 * 24))
+            return sum + Math.max(0, days)
+          }, 0) / overdueTasks.length * 10
+        ) / 10
+      : 0
+
     const { level, score, factors } = calculateRiskLevel({
       overdueCount: overdueTasks.length,
       maxOverdueDays,
@@ -848,6 +857,7 @@ router.get('/risk/:department', (req: Request, res: Response) => {
       completionRate,
       overdueCount: overdueTasks.length,
       maxOverdueDays,
+      avgOverdueDays,
       dueSoonCount: dueSoonTasks.length,
       supervisingCount: supervisingTasks.length,
       longNoUpdateCount: longNoUpdateTasks.length,

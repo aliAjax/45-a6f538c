@@ -161,6 +161,7 @@ export interface DepartmentRiskStats {
   completionRate: number
   overdueCount: number
   maxOverdueDays: number
+  avgOverdueDays: number
   dueSoonCount: number
   supervisingCount: number
   longNoUpdateCount: number

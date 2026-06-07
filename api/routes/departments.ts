@@ -329,6 +329,9 @@ router.get('/stats/risk', (_req: Request, res: Response) => {
         MAX(CASE WHEN t.status != 'completed' AND t.deadline < ?
             THEN CAST((julianday(?) - julianday(t.deadline)) AS INTEGER)
             ELSE 0 END) as max_overdue_days,
+        AVG(CASE WHEN t.status != 'completed' AND t.deadline < ?
+            THEN CAST((julianday(?) - julianday(t.deadline)) AS INTEGER)
+            ELSE NULL END) as avg_overdue_days,
         SUM(CASE WHEN t.status != 'completed' AND t.deadline >= ? AND t.deadline <= ? THEN 1 ELSE 0 END) as due_soon_count,
         SUM(CASE WHEN EXISTS (
             SELECT 1 FROM task_supervisions ts
@@ -340,7 +343,7 @@ router.get('/stats/risk', (_req: Request, res: Response) => {
       ORDER BY
         (SELECT COALESCE(sort_order, 9999) FROM departments d WHERE d.name = t.department) ASC,
         t.department ASC
-    `).all(today, today, today, dueSoonStart, dueSoonEnd, longNoUpdateDate) as any[]
+    `).all(today, today, today, today, today, dueSoonStart, dueSoonEnd, longNoUpdateDate) as any[]
 
     const deptMap = new Map<string, boolean>()
     const deptRows = db.prepare('SELECT name, is_active FROM departments').all() as { name: string; is_active: number }[]
@@ -352,6 +355,7 @@ router.get('/stats/risk', (_req: Request, res: Response) => {
       const completionRate = total > 0 ? Math.round((completed / total) * 1000) / 10 : 0
       const overdueCount = row.overdue_count
       const maxOverdueDays = row.max_overdue_days || 0
+      const avgOverdueDays = row.avg_overdue_days ? Math.round(row.avg_overdue_days * 10) / 10 : 0
       const dueSoonCount = row.due_soon_count
       const supervisingCount = row.supervising_count
       const longNoUpdateCount = row.long_no_update_count
@@ -374,6 +378,7 @@ router.get('/stats/risk', (_req: Request, res: Response) => {
         completionRate,
         overdueCount,
         maxOverdueDays,
+        avgOverdueDays,
         dueSoonCount,
         supervisingCount,
         longNoUpdateCount,

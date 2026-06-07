@@ -437,6 +437,7 @@ export default function DepartmentWorkbench() {
         <RiskView
           riskDetail={departmentRiskDetail}
           onTaskClick={handleTaskClick}
+          department={selectedDepartment}
         />
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
@@ -556,10 +557,13 @@ function getRiskLevelConfig(level: RiskLevel) {
 function RiskView({
   riskDetail,
   onTaskClick,
+  department,
 }: {
   riskDetail: DepartmentRiskDetail | null
   onTaskClick: (task: Task) => void
+  department: string
 }) {
+  const navigate = useNavigate()
   if (!riskDetail) {
     return (
       <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center">
@@ -575,10 +579,13 @@ function RiskView({
     {
       label: '逾期事项',
       value: stats.overdueCount,
-      subValue: stats.maxOverdueDays > 0 ? `最长${stats.maxOverdueDays}天` : '',
+      subValue: stats.overdueCount > 0
+        ? `平均${stats.avgOverdueDays}天 / 最长${stats.maxOverdueDays}天`
+        : '',
       icon: AlertTriangle,
       color: 'red',
       tasks: riskDetail.overdueTasks,
+      navigateTo: `/tasks?department=${encodeURIComponent(department)}&status=pending`,
     },
     {
       label: '临期事项',
@@ -587,6 +594,7 @@ function RiskView({
       icon: Clock3,
       color: 'amber',
       tasks: riskDetail.dueSoonTasks,
+      navigateTo: `/tasks?department=${encodeURIComponent(department)}&status=pending`,
     },
     {
       label: '督办中事项',
@@ -595,6 +603,7 @@ function RiskView({
       icon: BellRing,
       color: 'rose',
       tasks: riskDetail.supervisingTasks,
+      navigateTo: `/tasks?department=${encodeURIComponent(department)}&status=pending`,
     },
     {
       label: '长期未更新',
@@ -603,6 +612,7 @@ function RiskView({
       icon: Activity,
       color: 'violet',
       tasks: riskDetail.longNoUpdateTasks,
+      navigateTo: `/tasks?department=${encodeURIComponent(department)}&status=pending`,
     },
   ]
 
@@ -687,11 +697,13 @@ function RiskView({
           const colors = colorMap[metric.color]
           const Icon = metric.icon
           return (
-            <div
+            <button
               key={metric.label}
+              onClick={() => metric.navigateTo && navigate(metric.navigateTo)}
               className={cn(
-                'p-4 rounded-2xl border bg-white transition-all hover:shadow-sm',
-                colors.borderClass
+                'p-4 rounded-2xl border bg-white transition-all hover:shadow-sm text-left w-full',
+                colors.borderClass,
+                metric.navigateTo ? 'cursor-pointer hover:border-slate-300' : 'cursor-default'
               )}
             >
               <div className="flex items-start gap-3">
@@ -708,7 +720,7 @@ function RiskView({
                   )}
                 </div>
               </div>
-            </div>
+            </button>
           )
         })}
       </div>
