@@ -80,6 +80,7 @@ export default function DepartmentWorkbench() {
   const [showConfirmStep, setShowConfirmStep] = useState(false)
   const [batchLoading, setBatchLoading] = useState(false)
   const [batchResults, setBatchResults] = useState<BatchUpdateTaskResult[] | null>(null)
+  const [batchError, setBatchError] = useState<string | null>(null)
   const [activeQueue, setActiveQueue] = useState<QueueType>('pending')
 
   useEffect(() => {
@@ -172,6 +173,7 @@ export default function DepartmentWorkbench() {
     setBatchProgress('')
     setShowConfirmStep(false)
     setBatchResults(null)
+    setBatchError(null)
     setShowBatchModal(true)
   }
 
@@ -186,6 +188,7 @@ export default function DepartmentWorkbench() {
   const handleBatchUpdate = async () => {
     setBatchLoading(true)
     setBatchResults(null)
+    setBatchError(null)
 
     try {
       const updates = Array.from(selectedTaskIds).map((id) => ({
@@ -208,6 +211,8 @@ export default function DepartmentWorkbench() {
       }
     } catch (err) {
       console.error('Batch update failed:', err)
+      const error = err as Error
+      setBatchError(error.message || '批量更新失败，请稍后重试')
     } finally {
       setBatchLoading(false)
     }
@@ -443,8 +448,10 @@ export default function DepartmentWorkbench() {
           onNextStep={handleNextStep}
           onBackStep={handleBackStep}
           onSubmit={handleBatchUpdate}
+          onRetry={handleBatchUpdate}
           loading={batchLoading}
           results={batchResults}
+          error={batchError}
         />
       )}
     </div>
@@ -550,8 +557,10 @@ function BatchUpdateModal({
   onNextStep,
   onBackStep,
   onSubmit,
+  onRetry,
   loading,
   results,
+  error,
 }: {
   isOpen: boolean
   onClose: () => void
@@ -564,8 +573,10 @@ function BatchUpdateModal({
   onNextStep: () => void
   onBackStep: () => void
   onSubmit: () => void
+  onRetry: () => void
   loading: boolean
   results: BatchUpdateTaskResult[] | null
+  error: string | null
 }) {
   if (!isOpen) return null
 
@@ -574,6 +585,7 @@ function BatchUpdateModal({
   const hasResults = results !== null
   const allSuccess = hasResults && failCount === 0
   const hasFailures = hasResults && failCount > 0
+  const hasGlobalError = error !== null && !hasResults
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -599,7 +611,48 @@ function BatchUpdateModal({
           </button>
         </div>
 
-        {hasResults ? (
+        {hasGlobalError ? (
+          <div className="p-5">
+            <div className="p-4 bg-red-50 border border-red-200 rounded-xl mb-5">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                  <AlertCircle className="w-5 h-5 text-red-600" />
+                </div>
+                <div>
+                  <p className="font-medium text-red-800 mb-1">批量更新失败</p>
+                  <p className="text-sm text-red-600">{error}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-600 mb-5">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-slate-400" />
+                <span>
+                  本次操作未能完成，所有事项均未更新。您可以检查网络连接后重试，或关闭对话框稍后再试。
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-5 py-2.5 text-sm font-medium text-slate-700 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors"
+              >
+                关闭
+              </button>
+              <button
+                type="button"
+                onClick={onRetry}
+                disabled={loading}
+                className="px-5 py-2.5 text-sm font-medium text-white bg-primary-600 rounded-xl hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? '重试中...' : '重试'}
+              </button>
+            </div>
+          </div>
+        ) : hasResults ? (
           <div className="p-5">
             <div
               className={cn(
