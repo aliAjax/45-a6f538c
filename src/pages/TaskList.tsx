@@ -1,17 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import {
   CheckSquare,
   Building2,
   Filter,
   ChevronDown,
   ShieldAlert,
+  Edit3,
+  ListChecks,
+  X,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import TaskCard from '../components/TaskCard'
 import TaskUpdateModal from '../components/TaskUpdateModal'
-import type { Task, RiskLevel } from '../../shared/types'
+import BatchUpdateModal, { type BatchUpdateFormData } from '../components/BatchUpdateModal'
+import type { Task, RiskLevel, BatchUpdateTaskResult } from '../../shared/types'
 import { cn } from '../lib/utils'
 import { useSearchParams, useNavigate } from 'react-router-dom'
+import { ApiError } from '../utils/api'
 
 function getRiskLevelConfig(level: RiskLevel) {
   switch (level) {
@@ -55,6 +60,7 @@ export default function TaskList() {
     fetchDepartments,
     fetchDepartmentTaskStats,
     fetchDepartmentRiskStats,
+    batchUpdateTasks,
   } = useAppStore()
 
   const urlDepartment = searchParams.get('department') || 'all'
@@ -67,6 +73,13 @@ export default function TaskList() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [showDeptDropdown, setShowDeptDropdown] = useState(false)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<number>>(new Set())
+  const [showBatchModal, setShowBatchModal] = useState(false)
+  const [batchLoading, setBatchLoading] = useState(false)
+  const [batchResults, setBatchResults] = useState<BatchUpdateTaskResult[] | null>(null)
+  const [batchError, setBatchError] = useState<string | null>(null)
+  const [blockedTasks, setBlockedTasks] = useState<Array<{ id: number; content: string; uncompletedPrereqCount: number }> | null>(null)
 
   useEffect(() => {
     fetchDepartments()
@@ -115,13 +128,109 @@ export default function TaskList() {
     setSearchParams(params)
   }
 
-  const handleTaskClick = (task: Task) => {
-    setSelectedTask(task)
-    setModalOpen(true)
-  }
-
   const handleUpdated = () => {
     fetchTasks(selectedDepartment, selectedStatus, 1, 50, selectedRisk)
+  }
+
+  const selectableTasks = useMemo(() => {
+    return tasks.filter((t) => t.status !== 'completed')
+  }, [tasks])
+
+  const allSelected = useMemo(() => {
+    if (selectableTasks.length === 0) return false
+    return selectableTasks.every((t) => selectedTaskIds.has(t.id))
+  }, [selectableTasks, selectedTaskIds])
+
+  const someSelected = useMemo(() => {
+    if (selectableTasks.length === 0) return false
+    return selectableTasks.some((t) => selectedTaskIds.has(t.id))
+  }, [selectableTasks, selectedTaskIds])
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedTaskIds(new Set())
+    } else {
+      const ids = new Set(selectableTasks.map((t) => t.id))
+      setSelectedTaskIds(ids)
+    }
+  }
+
+  const toggleSelectTask = (taskId: number) => {
+    const newSelected = new Set(selectedTaskIds)
+    if (newSelected.has(taskId)) {
+      newSelected.delete(taskId)
+    } else {
+      newSelected.add(taskId)
+    }
+    setSelectedTaskIds(newSelected)
+  }
+
+  const handleTaskClick = (task: Task) => {
+    if (selectMode) {
+      toggleSelectTask(task.id)
+    } else {
+      setSelectedTask(task)
+      setModalOpen(true)
+    }
+  }
+
+  const openBatchModal = () => {
+    if (selectedTaskIds.size === 0) return
+    setBatchResults(null)
+    setBatchError(null)
+    setBlockedTasks(null)
+    setShowBatchModal(true)
+  }
+
+  const handleBatchUpdate = async (data: BatchUpdateFormData) => {
+    setBatchLoading(true)
+    setBatchResults(null)
+    setBatchError(null)
+    setBlockedTasks(null)
+
+    try {
+      const updates = Array.from(selectedTaskIds).map((id) => ({
+        id,
+        ...data,
+      }))
+
+      const result = await batchUpdateTasks({ updates })
+      setBatchResults(result.results)
+
+      if (result.failCount === 0) {
+        setTimeout(() => {
+          setShowBatchModal(false)
+          setSelectedTaskIds(new Set())
+          setSelectMode(false)
+          fetchTasks(selectedDepartment, selectedStatus, 1, 50, selectedRisk)
+        }, 1500)
+      }
+    } catch (err) {
+      console.error('Batch update failed:', err)
+      const error = err as ApiError
+      setBatchError(error.message || '批量更新失败，请稍后重试')
+
+      if (error.responseData?.blockedTasks) {
+        setBlockedTasks(error.responseData.blockedTasks as Array<{ id: number; content: string; uncompletedPrereqCount: number }>)
+      }
+    } finally {
+      setBatchLoading(false)
+    }
+  }
+
+  const handleCloseBatchModal = () => {
+    if (batchLoading) return
+    setShowBatchModal(false)
+    setBlockedTasks(null)
+    if (batchResults) {
+      fetchTasks(selectedDepartment, selectedStatus, 1, 50, selectedRisk)
+      setBatchResults(null)
+    }
+  }
+
+  const handleToggleSelectMode = () => {
+    setSelectMode(!selectMode)
+    setSelectedTaskIds(new Set())
   }
 
   const allDepartments = ['all', ...allTaskDepartments]
@@ -247,6 +356,25 @@ export default function TaskList() {
               <ShieldAlert className="w-4 h-4" />
               风险研判
             </button>
+
+            {selectMode ? (
+              <button
+                onClick={handleToggleSelectMode}
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-800 transition-colors"
+              >
+                <X className="w-4 h-4" />
+                取消选择
+              </button>
+            ) : (
+              <button
+                onClick={handleToggleSelectMode}
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-primary-600 hover:text-primary-700 transition-colors"
+              >
+                <ListChecks className="w-4 h-4" />
+                批量操作
+              </button>
+            )}
+
             <div className="text-sm text-slate-500">
               共 <span className="font-medium text-slate-700">{tasksTotal}</span>{' '}
               条事项
@@ -320,6 +448,48 @@ export default function TaskList() {
         </div>
       )}
 
+      {selectMode && tasks.length > 0 && (
+        <div className="bg-white rounded-2xl border border-primary-200 p-4 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <label className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allSelected}
+                ref={(el) => {
+                  if (el) el.indeterminate = someSelected && !allSelected
+                }}
+                onChange={toggleSelectAll}
+                className="w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+              />
+              <span>
+                全选当前页
+                <span className="text-slate-400 ml-1">
+                  (已选 {selectedTaskIds.size} / {selectableTasks.length})
+                </span>
+              </span>
+            </label>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSelectedTaskIds(new Set())}
+              className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 transition-colors"
+              disabled={selectedTaskIds.size === 0}
+            >
+              清空选择
+            </button>
+            <button
+              onClick={openBatchModal}
+              disabled={selectedTaskIds.size === 0}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-xl hover:bg-primary-700 transition-colors text-sm font-medium shadow-sm shadow-primary-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Edit3 className="w-4 h-4" />
+              批量更新 ({selectedTaskIds.size})
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {tasks.length === 0 ? (
           <div className="col-span-full py-16 text-center">
@@ -333,6 +503,9 @@ export default function TaskList() {
             <TaskCard
               key={task.id}
               task={task}
+              selectable={selectMode}
+              selected={selectedTaskIds.has(task.id)}
+              onToggleSelect={() => toggleSelectTask(task.id)}
               onClick={() => handleTaskClick(task)}
             />
           ))
@@ -344,6 +517,19 @@ export default function TaskList() {
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onUpdated={handleUpdated}
+      />
+
+      <BatchUpdateModal
+        isOpen={showBatchModal}
+        onClose={handleCloseBatchModal}
+        selectedCount={selectedTaskIds.size}
+        departments={departments}
+        onSubmit={handleBatchUpdate}
+        loading={batchLoading}
+        results={batchResults}
+        error={batchError}
+        blockedTasks={blockedTasks}
+        onRetry={handleBatchUpdate}
       />
     </div>
   )

@@ -281,6 +281,8 @@ export interface BatchUpdateTaskItem {
   id: number
   status?: 'pending' | 'in_progress' | 'completed'
   progress?: string
+  department?: string
+  deadline?: string
 }
 
 export interface BatchUpdateTaskRequest {

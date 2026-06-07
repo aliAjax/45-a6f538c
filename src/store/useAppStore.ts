@@ -382,6 +382,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           fetchTasks,
           fetchDepartmentWorkbench,
           fetchDepartmentRiskDetail,
+          fetchReminders,
+          fetchSupervisingTasks,
           departmentWorkbench,
           departmentRiskDetail,
           tasks,
@@ -392,6 +394,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         fetchThisWeekTasks()
         fetchDepartmentTaskStats()
         fetchDepartmentRiskStats()
+        fetchReminders()
+        fetchSupervisingTasks()
 
         if (tasks.length > 0) {
           fetchTasks('all', 'all', 1, 50)

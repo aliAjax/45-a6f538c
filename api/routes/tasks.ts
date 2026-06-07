@@ -721,6 +721,16 @@ router.patch('/batch/update', (req: Request, res: Response) => {
         values.push(update.progress)
       }
 
+      if (update.department !== undefined) {
+        fields.push('department = ?')
+        values.push(update.department)
+      }
+
+      if (update.deadline !== undefined) {
+        fields.push('deadline = ?')
+        values.push(update.deadline)
+      }
+
       if (fields.length === 0) {
         results.push({ id: update.id, success: false, error: '没有需要更新的字段' })
         failCount++

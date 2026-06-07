@@ -7,9 +7,12 @@ interface TaskCardProps {
   task: Task
   variant?: 'default' | 'overdue' | 'this-week'
   onClick?: () => void
+  selectable?: boolean
+  selected?: boolean
+  onToggleSelect?: () => void
 }
 
-export default function TaskCard({ task, variant = 'default', onClick }: TaskCardProps) {
+export default function TaskCard({ task, variant = 'default', onClick, selectable, selected, onToggleSelect }: TaskCardProps) {
   const daysLeft = getDaysLeft(task.deadline)
   const isOverdue = daysLeft < 0 && task.status !== 'completed'
   const isUrgent = daysLeft >= 0 && daysLeft <= 3 && task.status !== 'completed'
@@ -31,17 +34,33 @@ export default function TaskCard({ task, variant = 'default', onClick }: TaskCar
 
   return (
     <div
-      onClick={onClick}
+      onClick={selectable ? undefined : onClick}
       className={cn(
-        'bg-white rounded-xl border p-4 transition-all duration-200 cursor-pointer group',
-        variant === 'overdue'
+        'bg-white rounded-xl border p-4 transition-all duration-200 group',
+        selectable ? 'cursor-default' : 'cursor-pointer',
+        selected && 'bg-primary-50/50 border-primary-300',
+        !selected && variant === 'overdue'
           ? 'border-red-200 hover:border-red-300 hover:shadow-md hover:shadow-red-50'
-          : variant === 'this-week'
+          : !selected && variant === 'this-week'
           ? 'border-amber-200 hover:border-amber-300 hover:shadow-md hover:shadow-amber-50'
-          : 'border-slate-200 hover:border-slate-300 hover:shadow-md'
+          : !selected
+          ? 'border-slate-200 hover:border-slate-300 hover:shadow-md'
+          : ''
       )}
     >
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start gap-3">
+        {selectable && (
+          <input
+            type="checkbox"
+            checked={selected || false}
+            onChange={(e) => {
+              e.stopPropagation()
+              onToggleSelect?.()
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="mt-1 w-4 h-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500 flex-shrink-0"
+          />
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-2 flex-wrap">
             <StatusBadge status={task.status} size="sm" />
