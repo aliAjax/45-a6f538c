@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -88,6 +88,9 @@ export default function MeetingImportPreview() {
   const [checkingDuplicates, setCheckingDuplicates] = useState(false)
   const [decisions, setDecisions] = useState<Map<number, ImportMeetingDecision>>(new Map())
   const [expandedDuplicates, setExpandedDuplicates] = useState<Set<number>>(new Set())
+  const hasCheckedDuplicates = useRef(false)
+  const checkDuplicatesTimer = useRef<number | null>(null)
+  const isCheckingDuplicates = useRef(false)
 
   useEffect(() => {
     fetchDepartments()
@@ -105,25 +108,43 @@ export default function MeetingImportPreview() {
         }))
         setMeetings(normalized)
         setExpandedMeetings(new Set(normalized.map((_, i) => i)))
+        if (normalized.length > 0) {
+          hasCheckedDuplicates.current = true
+          checkDuplicatesTimer.current = window.setTimeout(() => {
+            handleCheckDuplicatesWithData(normalized)
+          }, 0)
+        }
       } catch {
         setError('数据加载失败，请重新导入')
       }
     } else {
       navigate('/meetings/import')
     }
+    return () => {
+      if (checkDuplicatesTimer.current) {
+        clearTimeout(checkDuplicatesTimer.current)
+      }
+    }
   }, [fetchDepartments, navigate])
 
   useEffect(() => {
-    if (meetings.length > 0) {
+    if (meetings.length > 0 && !hasCheckedDuplicates.current) {
+      hasCheckedDuplicates.current = true
       handleCheckDuplicates()
     }
-  }, [])
+  }, [meetings])
 
   const handleCheckDuplicates = async () => {
+    await handleCheckDuplicatesWithData(meetings)
+  }
+
+  const handleCheckDuplicatesWithData = async (meetingList: MeetingFormData[]) => {
+    if (isCheckingDuplicates.current) return
+    isCheckingDuplicates.current = true
     setCheckingDuplicates(true)
     setError('')
     try {
-      const checkData = meetings.map((m) => ({
+      const checkData = meetingList.map((m) => ({
         title: m.title,
         meetingDate: m.meetingDate,
         departments: m.departments,
@@ -149,6 +170,7 @@ export default function MeetingImportPreview() {
       setError(`查重失败：${e.message}`)
     } finally {
       setCheckingDuplicates(false)
+      isCheckingDuplicates.current = false
     }
   }
 
@@ -353,6 +375,14 @@ export default function MeetingImportPreview() {
 
         if (remainingMeetings.length > 0) {
           sessionStorage.setItem('importMeetings', JSON.stringify(remainingMeetings))
+          setMeetings(remainingMeetings)
+          setDuplicateResults(remainingDuplicates)
+          setDecisions(remainingDecisions)
+          setExpandedMeetings(new Set(remainingMeetings.map((_, i) => i)))
+          hasCheckedDuplicates.current = false
+          handleCheckDuplicatesWithData(remainingMeetings)
+        } else {
+          sessionStorage.removeItem('importMeetings')
         }
       }
     } catch (err) {
