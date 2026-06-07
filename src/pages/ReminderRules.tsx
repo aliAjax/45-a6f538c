@@ -28,7 +28,7 @@ export default function ReminderRules() {
 
   const [showModal, setShowModal] = useState(false)
   const [editingDept, setEditingDept] = useState<string | null>(null)
-  const [editingRule, setEditingRule] = useState<ReminderRule | null>(null)
+  const [isDefaultEditing, setIsDefaultEditing] = useState(false)
   const [formData, setFormData] = useState<UpdateReminderRuleRequest>({
     advanceDays: 3,
     includeSupervisionFollowUp: false,
@@ -50,12 +50,12 @@ export default function ReminderRules() {
     setSubmitError('')
     setSubmitting(false)
     setEditingDept(null)
-    setEditingRule(null)
+    setIsDefaultEditing(false)
   }
 
   const openEditModal = (dept: string, rule: ReminderRule, isDefault: boolean) => {
     setEditingDept(dept)
-    setEditingRule(rule)
+    setIsDefaultEditing(isDefault)
     setFormData({
       advanceDays: rule.advanceDays,
       includeSupervisionFollowUp: rule.includeSupervisionFollowUp,
@@ -377,18 +377,17 @@ export default function ReminderRules() {
             </div>
 
             <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 bg-slate-50">
-              {editingRule && !editingRule.id ? null : (
+              {!isDefaultEditing && (
                 <button
                   type="button"
                   onClick={() => {
-                    if (editingDept && !editingRule?.id) return
-                    if (editingDept && editingRule?.id) {
+                    if (editingDept) {
                       handleResetDefault(editingDept)
                       setShowModal(false)
                       resetForm()
                     }
                   }}
-                  disabled={submitting || !editingRule?.id}
+                  disabled={submitting}
                   className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded-xl hover:bg-amber-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <RotateCcw className="w-4 h-4" />

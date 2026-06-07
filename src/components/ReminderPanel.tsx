@@ -180,7 +180,7 @@ export default function ReminderPanel({ isOpen, onClose }: ReminderPanelProps) {
     <>
       <div
         ref={panelRef}
-        className="absolute right-0 top-full mt-2 w-80 md:w-96 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden z-50 animate-in slide-in-from-top-2 fade-in duration-200"
+        className="absolute right-0 top-full mt-2 w-80 md:w-96 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden z-50 animate-in slide-in-from-top-2 fade-in duration-200 max-h-[80vh] flex flex-col"
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
           <div className="flex items-center gap-2">
@@ -204,7 +204,7 @@ export default function ReminderPanel({ isOpen, onClose }: ReminderPanelProps) {
           </button>
         </div>
 
-        <div className="max-h-96 overflow-y-auto p-3">
+        <div className="flex-1 overflow-y-auto p-3">
           {loading && !reminderGroups ? (
             <div className="py-10 text-center">
               <RefreshCw className="w-6 h-6 text-slate-400 animate-spin mx-auto mb-2" />
@@ -235,7 +235,7 @@ export default function ReminderPanel({ isOpen, onClose }: ReminderPanelProps) {
                 badgeColor="text-amber-500"
               />
               <GroupSection
-                title="三天内到期"
+                title="即将到期"
                 icon={CalendarDays}
                 tasks={reminderGroups?.upcoming || []}
                 type="upcoming"

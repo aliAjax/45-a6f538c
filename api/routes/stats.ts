@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from 'express'
 import db from '../db.js'
 import { getReminderRuleForDepartment } from './reminder-rules.js'
-import type { Stats, Task } from '../../shared/types.js'
+import type { Stats } from '../../shared/types.js'
 
 const router = Router()
 
@@ -19,7 +19,6 @@ router.get('/', (_req: Request, res: Response) => {
   try {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-    const todayStr = today.toISOString().split('T')[0]
 
     const meetingsCount = db.prepare('SELECT COUNT(*) as count FROM meetings').get() as { count: number }
     const tasksCount = db.prepare('SELECT COUNT(*) as count FROM tasks').get() as { count: number }

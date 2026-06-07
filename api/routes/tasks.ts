@@ -194,8 +194,6 @@ function enrichTasksWithDependencies(tasks: Task[]) {
 
     task.prerequisiteTasks = prereqIds
       .map(id => {
-        const existing = taskMap.get(id)
-        if (existing) return existing
         const info = prereqInfoMap.get(id)
         if (info) {
           return {
@@ -211,14 +209,47 @@ function enrichTasksWithDependencies(tasks: Task[]) {
             isBlocked: false,
             prerequisiteTaskIds: [],
             blockingTaskIds: [],
-          }
+          } as Task
         }
         return null
       })
-      .filter((t): t is Task => t !== null)
+      .filter((t) => t !== null) as Task[]
+
+    const blockingInfoMap = new Map<number, { status: string; content: string; meetingId: number }>()
+    dependencyRows.forEach(row => {
+      if (row.prerequisite_task_id === task.id) {
+        const blockingTaskInfo = tasks.find(t => t.id === row.task_id)
+        if (blockingTaskInfo) {
+          blockingInfoMap.set(row.task_id, {
+            status: blockingTaskInfo.status,
+            content: blockingTaskInfo.content,
+            meetingId: blockingTaskInfo.meetingId || 0,
+          })
+        }
+      }
+    })
     task.blockingTasks = blockingIds
-      .map(id => taskMap.get(id))
-      .filter((t): t is Task => t !== undefined)
+      .map(id => {
+        const info = blockingInfoMap.get(id)
+        if (info) {
+          return {
+            id,
+            meetingId: info.meetingId,
+            content: info.content,
+            department: '',
+            deadline: '',
+            status: info.status as Task['status'],
+            progress: '',
+            createdAt: '',
+            updatedAt: '',
+            isBlocked: false,
+            prerequisiteTaskIds: [],
+            blockingTaskIds: [],
+          } as Task
+        }
+        return null
+      })
+      .filter((t) => t !== null) as Task[]
   })
 }
 
@@ -624,8 +655,6 @@ router.patch('/:id', (req: Request, res: Response) => {
 
     const newStatus = status !== undefined ? status : taskRow.status
     const newProgress = progress !== undefined ? progress : taskRow.progress || ''
-    const newDepartment = req.body.department !== undefined ? req.body.department : taskRow.department
-    const newDeadline = req.body.deadline !== undefined ? req.body.deadline : taskRow.deadline
 
     db.transaction(() => {
       if (hasFieldUpdates) {

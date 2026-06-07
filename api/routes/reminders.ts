@@ -136,7 +136,6 @@ router.get('/', (_req: Request, res: Response) => {
   try {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-    const todayStr = today.toISOString().split('T')[0]
 
     const allRows = db.prepare(`
       SELECT t.*, m.title as meeting_title,

@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import db from '../db.js'
-import type { ReminderRule, UpdateReminderRuleRequest, DEFAULT_REMINDER_RULE } from '../../shared/types.js'
+import { DEFAULT_REMINDER_RULE, type ReminderRule, type UpdateReminderRuleRequest } from '../../shared/types.js'
 
 const router = Router()
 
@@ -30,9 +30,7 @@ function getDefaultRuleForDepartment(department: string): ReminderRule {
   return {
     id: 0,
     department,
-    advanceDays: 3,
-    includeSupervisionFollowUp: false,
-    repeatOverdue: true,
+    ...DEFAULT_REMINDER_RULE,
     createdAt: '',
     updatedAt: '',
   }
