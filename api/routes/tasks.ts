@@ -166,10 +166,16 @@ function enrichTasksWithDependencies(tasks: Task[]) {
   tasks.forEach(task => {
     const prereqIds: number[] = []
     const blockingIds: number[] = []
+    const prereqInfoMap = new Map<number, { status: string; content: string; meetingId: number }>()
 
     dependencyRows.forEach(row => {
       if (row.task_id === task.id) {
         prereqIds.push(row.prerequisite_task_id)
+        prereqInfoMap.set(row.prerequisite_task_id, {
+          status: row.prereq_status,
+          content: row.prereq_content,
+          meetingId: row.prereq_meeting_id,
+        })
       }
       if (row.prerequisite_task_id === task.id) {
         blockingIds.push(row.task_id)
@@ -180,14 +186,35 @@ function enrichTasksWithDependencies(tasks: Task[]) {
     task.blockingTaskIds = blockingIds
 
     const uncompletedPrereqs = prereqIds.filter(id => {
-      const prereqTask = taskMap.get(id)
-      return prereqTask && prereqTask.status !== 'completed'
+      const prereqInfo = prereqInfoMap.get(id)
+      return prereqInfo && prereqInfo.status !== 'completed'
     })
     task.isBlocked = uncompletedPrereqs.length > 0
 
     task.prerequisiteTasks = prereqIds
-      .map(id => taskMap.get(id))
-      .filter((t): t is Task => t !== undefined)
+      .map(id => {
+        const existing = taskMap.get(id)
+        if (existing) return existing
+        const info = prereqInfoMap.get(id)
+        if (info) {
+          return {
+            id,
+            meetingId: info.meetingId,
+            content: info.content,
+            department: '',
+            deadline: '',
+            status: info.status as Task['status'],
+            progress: '',
+            createdAt: '',
+            updatedAt: '',
+            isBlocked: false,
+            prerequisiteTaskIds: [],
+            blockingTaskIds: [],
+          }
+        }
+        return null
+      })
+      .filter((t): t is Task => t !== null)
     task.blockingTasks = blockingIds
       .map(id => taskMap.get(id))
       .filter((t): t is Task => t !== undefined)

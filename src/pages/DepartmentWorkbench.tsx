@@ -23,6 +23,7 @@ import StatusBadge from '../components/StatusBadge'
 import type { Task, BatchUpdateTaskResult, RiskLevel, DepartmentRiskDetail } from '../../shared/types'
 import { cn } from '../lib/utils'
 import { useSearchParams, useNavigate } from 'react-router-dom'
+import { ApiError } from '../utils/api'
 
 type QueueType = 'pending' | 'overdue' | 'dueThisWeek' | 'completed' | 'risk'
 
@@ -255,11 +256,11 @@ export default function DepartmentWorkbench() {
       }
     } catch (err) {
       console.error('Batch update failed:', err)
-      const error = err as any
+      const error = err as ApiError
       setBatchError(error.message || '批量更新失败，请稍后重试')
 
       if (error.responseData?.blockedTasks) {
-        setBlockedTasks(error.responseData.blockedTasks)
+        setBlockedTasks(error.responseData.blockedTasks as Array<{ id: number; content: string; uncompletedPrereqCount: number }>)
       }
     } finally {
       setBatchLoading(false)

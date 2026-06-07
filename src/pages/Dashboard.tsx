@@ -314,7 +314,6 @@ export default function Dashboard() {
             <div className="space-y-3">
               {departmentTaskStats.map((stat) => {
                 const isActive = departments.includes(stat.department)
-                const activeCount = stat.total - stat.completed
                 const completedRate = stat.total > 0
                   ? Math.round((stat.completed / stat.total) * 100)
                   : 0

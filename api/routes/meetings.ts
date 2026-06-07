@@ -148,18 +148,35 @@ function enrichTasksWithDependencies(tasks: Task[]) {
   tasks.forEach(task => taskMap.set(task.id, task))
 
   const dependencyRows = db.prepare(`
-    SELECT task_id, prerequisite_task_id
-    FROM task_dependencies
-    WHERE task_id IN (${tasks.map(() => '?').join(',')})
-  `).all(...tasks.map(t => t.id)) as Array<{ task_id: number; prerequisite_task_id: number }>
+    SELECT td.task_id, td.prerequisite_task_id,
+           t.status as prereq_status,
+           t.content as prereq_content,
+           t.meeting_id as prereq_meeting_id
+    FROM task_dependencies td
+    LEFT JOIN tasks t ON td.prerequisite_task_id = t.id
+    WHERE td.task_id IN (${tasks.map(() => '?').join(',')})
+       OR td.prerequisite_task_id IN (${tasks.map(() => '?').join(',')})
+  `).all(...[...tasks.map(t => t.id), ...tasks.map(t => t.id)]) as Array<{
+    task_id: number
+    prerequisite_task_id: number
+    prereq_status: string
+    prereq_content: string
+    prereq_meeting_id: number
+  }>
 
   tasks.forEach(task => {
     const prereqIds: number[] = []
     const blockingIds: number[] = []
+    const prereqInfoMap = new Map<number, { status: string; content: string; meetingId: number }>()
 
     dependencyRows.forEach(row => {
       if (row.task_id === task.id) {
         prereqIds.push(row.prerequisite_task_id)
+        prereqInfoMap.set(row.prerequisite_task_id, {
+          status: row.prereq_status,
+          content: row.prereq_content,
+          meetingId: row.prereq_meeting_id,
+        })
       }
       if (row.prerequisite_task_id === task.id) {
         blockingIds.push(row.task_id)
@@ -170,14 +187,35 @@ function enrichTasksWithDependencies(tasks: Task[]) {
     task.blockingTaskIds = blockingIds
 
     const uncompletedPrereqs = prereqIds.filter(id => {
-      const prereqTask = taskMap.get(id)
-      return prereqTask && prereqTask.status !== 'completed'
+      const prereqInfo = prereqInfoMap.get(id)
+      return prereqInfo && prereqInfo.status !== 'completed'
     })
     task.isBlocked = uncompletedPrereqs.length > 0
 
     task.prerequisiteTasks = prereqIds
-      .map(id => taskMap.get(id))
-      .filter((t): t is Task => t !== undefined)
+      .map(id => {
+        const existing = taskMap.get(id)
+        if (existing) return existing
+        const info = prereqInfoMap.get(id)
+        if (info) {
+          return {
+            id,
+            meetingId: info.meetingId,
+            content: info.content,
+            department: '',
+            deadline: '',
+            status: info.status as Task['status'],
+            progress: '',
+            createdAt: '',
+            updatedAt: '',
+            isBlocked: false,
+            prerequisiteTaskIds: [],
+            blockingTaskIds: [],
+          }
+        }
+        return null
+      })
+      .filter((t): t is Task => t !== null)
     task.blockingTasks = blockingIds
       .map(id => taskMap.get(id))
       .filter((t): t is Task => t !== undefined)

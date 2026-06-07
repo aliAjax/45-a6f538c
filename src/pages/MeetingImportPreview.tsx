@@ -218,7 +218,7 @@ export default function MeetingImportPreview() {
     if (newMeetings[meetingIndex].tasks.length > 1) {
       const tasks = newMeetings[meetingIndex].tasks
       tasks.splice(taskIndex, 1)
-      const adjustedTasks = tasks.map((task, i) => ({
+      const adjustedTasks = tasks.map((task) => ({
         ...task,
         prerequisiteIndexes: (task.prerequisiteIndexes || [])
           .filter(idx => idx !== taskIndex)
@@ -368,9 +368,7 @@ export default function MeetingImportPreview() {
           }
         })
 
-        const tasksWithPrereqs = validTasks.map((task, idx) => {
-          const origIdx = Array.from(originalIndexToValidIndex.entries())
-            .find(([, vIdx]) => vIdx === idx)?.[0]
+        const tasksWithPrereqs = validTasks.map((task) => {
           const origPrereqs = task.prerequisiteIndexes || []
           const validPrereqs = origPrereqs
             .filter(origPrereqIdx => originalIndexToValidIndex.has(origPrereqIdx))
