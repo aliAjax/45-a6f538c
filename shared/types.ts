@@ -227,3 +227,88 @@ export interface DepartmentWorkbenchData {
     completed: number
   }
 }
+
+export type DuplicateAction = 'create' | 'skip' | 'append'
+
+export interface DuplicateTaskMatch {
+  taskId: number
+  content: string
+  department: string
+  deadline: string
+  similarity: number
+}
+
+export interface DuplicateMeetingMatch {
+  meetingId: number
+  title: string
+  meetingDate: string
+  departments: string
+  taskCount: number
+  titleSimilarity: number
+  dateMatch: boolean
+  deptOverlap: number
+  matchingTasks: DuplicateTaskMatch[]
+}
+
+export interface DuplicateCheckItem {
+  index: number
+  title: string
+  meetingDate: string
+  departments: string
+  tasks: ParsedTask[]
+  suspectedDuplicates: DuplicateMeetingMatch[]
+  hasDuplicate: boolean
+}
+
+export interface DuplicateCheckRequest {
+  meetings: Array<{
+    title: string
+    meetingDate: string
+    departments: string
+    tasks: ParsedTask[]
+  }>
+}
+
+export interface DuplicateCheckResponse {
+  results: DuplicateCheckItem[]
+}
+
+export interface AppendTasksRequest {
+  tasks: Array<{
+    content: string
+    department: string
+    deadline: string
+  }>
+}
+
+export interface ImportMeetingDecision {
+  action: DuplicateAction
+  targetMeetingId?: number
+}
+
+export interface BatchImportRequest {
+  items: Array<{
+    meeting: {
+      title: string
+      departments: string
+      meetingDate: string
+      tasks: ParsedTask[]
+    }
+    decision: ImportMeetingDecision
+  }>
+}
+
+export interface BatchImportResultItem {
+  success: boolean
+  action: DuplicateAction
+  title: string
+  meetingId?: number
+  error?: string
+}
+
+export interface BatchImportResponse {
+  total: number
+  successCount: number
+  failCount: number
+  results: BatchImportResultItem[]
+}

@@ -21,6 +21,11 @@ import type {
   BatchUpdateTaskRequest,
   BatchUpdateTaskResponse,
   DepartmentWorkbenchData,
+  DuplicateCheckRequest,
+  DuplicateCheckResponse,
+  AppendTasksRequest,
+  BatchImportRequest,
+  BatchImportResponse,
 } from '../../shared/types'
 import api from '../utils/api'
 
@@ -81,6 +86,9 @@ interface AppState {
   fetchReminders: () => Promise<void>
   fetchMeetingReviewStats: (page?: number, pageSize?: number, startDate?: string, endDate?: string, search?: string) => Promise<void>
   parseMeetingText: (text: string) => Promise<ParseMeetingResponse>
+  checkDuplicates: (meetings: DuplicateCheckRequest['meetings']) => Promise<DuplicateCheckResponse>
+  appendTasksToMeeting: (meetingId: number, tasks: AppendTasksRequest['tasks']) => Promise<Task[]>
+  batchImportMeetings: (request: BatchImportRequest) => Promise<BatchImportResponse>
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -502,6 +510,48 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const result = await api.post<ParseMeetingResponse>('/meetings/parse', { text })
       set({ loading: false })
+      return result
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  checkDuplicates: async (meetings) => {
+    set({ loading: true, error: null })
+    try {
+      const result = await api.post<DuplicateCheckResponse>('/meetings/check-duplicates', { meetings })
+      set({ loading: false })
+      return result
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  appendTasksToMeeting: async (meetingId, tasks) => {
+    set({ loading: true, error: null })
+    try {
+      const result = await api.post<{ meetingId: number; tasks: Task[] }>(
+        `/meetings/${meetingId}/append-tasks`,
+        { tasks }
+      )
+      set({ loading: false })
+      return result.tasks
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  batchImportMeetings: async (request) => {
+    set({ loading: true, error: null })
+    try {
+      const result = await api.post<BatchImportResponse>('/meetings/batch-import', request)
+      set({ loading: false })
+      const { fetchMeetings, fetchStats } = get()
+      fetchMeetings(1, 10)
+      fetchStats()
       return result
     } catch (error) {
       set({ error: getErrorMessage(error), loading: false })

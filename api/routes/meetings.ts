@@ -9,6 +9,15 @@ import type {
   ParsedTask,
   ParseMeetingRequest,
   ParseMeetingResponse,
+  DuplicateCheckRequest,
+  DuplicateCheckResponse,
+  DuplicateCheckItem,
+  DuplicateMeetingMatch,
+  DuplicateTaskMatch,
+  AppendTasksRequest,
+  BatchImportRequest,
+  BatchImportResponse,
+  BatchImportResultItem,
 } from '../../shared/types.js'
 
 interface MeetingRow {
@@ -679,6 +688,386 @@ router.get('/review/stats', (req: Request, res: Response) => {
   } catch (error) {
     console.error('Get meeting review stats error:', error)
     res.status(500).json({ success: false, error: '获取会议复盘统计失败' })
+  }
+})
+
+function stringSimilarity(str1: string, str2: string): number {
+  if (!str1 || !str2) return 0
+  const s1 = str1.toLowerCase().trim()
+  const s2 = str2.toLowerCase().trim()
+  if (s1 === s2) return 1
+  if (s1.length === 0 || s2.length === 0) return 0
+
+  const longer = s1.length > s2.length ? s1 : s2
+  const shorter = s1.length > s2.length ? s2 : s1
+  const longerLength = longer.length
+
+  if (longerLength === 0) return 1
+
+  const costs: number[] = []
+  for (let i = 0; i <= shorter.length; i++) {
+    let lastValue = i
+    for (let j = 0; j <= longer.length; j++) {
+      if (i === 0) {
+        costs[j] = j
+      } else if (j > 0) {
+        let newValue = costs[j - 1]
+        if (shorter.charAt(i - 1) !== longer.charAt(j - 1)) {
+          newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1
+        }
+        costs[j - 1] = lastValue
+        lastValue = newValue
+      }
+    }
+    if (i > 0) costs[longer.length] = lastValue
+  }
+
+  const distance = costs[longer.length]
+  return (longerLength - distance) / longerLength
+}
+
+function splitDepartments(depts: string): string[] {
+  if (!depts) return []
+  return depts
+    .split(/[、,，;；\s]+/)
+    .map((d) => d.trim())
+    .filter((d) => d.length > 0)
+}
+
+function calculateDeptOverlap(depts1: string, depts2: string): number {
+  const set1 = new Set(splitDepartments(depts1).map((d) => d.toLowerCase()))
+  const set2 = new Set(splitDepartments(depts2).map((d) => d.toLowerCase()))
+  if (set1.size === 0 && set2.size === 0) return 0
+  if (set1.size === 0 || set2.size === 0) return 0
+  let overlap = 0
+  set1.forEach((d) => {
+    if (set2.has(d)) overlap++
+  })
+  return overlap / Math.max(set1.size, set2.size)
+}
+
+function isDateMatch(date1: string, date2: string): boolean {
+  if (!date1 || !date2) return false
+  const d1 = date1.split('T')[0]
+  const d2 = date2.split('T')[0]
+  return d1 === d2
+}
+
+router.post('/check-duplicates', (req: Request, res: Response) => {
+  try {
+    const { meetings } = req.body as DuplicateCheckRequest
+
+    if (!meetings || meetings.length === 0) {
+      return res.status(400).json({ success: false, error: '请提供要检查的会议数据' })
+    }
+
+    const allMeetingRows = db.prepare(
+      'SELECT * FROM meetings ORDER BY meeting_date DESC LIMIT 200'
+    ).all() as MeetingRow[]
+
+    const allTaskRows = db.prepare(
+      'SELECT * FROM tasks ORDER BY id DESC LIMIT 500'
+    ).all() as TaskRow[]
+
+    const tasksByMeeting = new Map<number, TaskRow[]>()
+    allTaskRows.forEach((task) => {
+      const tasks = tasksByMeeting.get(task.meeting_id) || []
+      tasks.push(task)
+      tasksByMeeting.set(task.meeting_id, tasks)
+    })
+
+    const results: DuplicateCheckItem[] = meetings.map((meeting, index) => {
+      const suspectedDuplicates: DuplicateMeetingMatch[] = []
+
+      for (const existingMeeting of allMeetingRows) {
+        const titleSim = stringSimilarity(meeting.title, existingMeeting.title)
+        const dateMatch = isDateMatch(meeting.meetingDate, existingMeeting.meeting_date)
+        const deptOverlap = calculateDeptOverlap(meeting.departments, existingMeeting.departments)
+
+        const existingTasks = tasksByMeeting.get(existingMeeting.id) || []
+        const matchingTasks: DuplicateTaskMatch[] = []
+
+        for (const newTask of meeting.tasks) {
+          if (!newTask.content.trim()) continue
+          for (const existingTask of existingTasks) {
+            const taskSim = stringSimilarity(newTask.content, existingTask.content)
+            const sameDept = newTask.department && existingTask.department
+              ? newTask.department.toLowerCase() === existingTask.department.toLowerCase()
+              : false
+            const sameDeadline = newTask.deadline && existingTask.deadline
+              ? isDateMatch(newTask.deadline, existingTask.deadline)
+              : false
+
+            let score = taskSim * 0.6
+            if (sameDept) score += 0.2
+            if (sameDeadline) score += 0.2
+
+            if (score >= 0.6) {
+              matchingTasks.push({
+                taskId: existingTask.id,
+                content: existingTask.content,
+                department: existingTask.department,
+                deadline: existingTask.deadline,
+                similarity: Math.round(score * 100) / 100,
+              })
+              break
+            }
+          }
+        }
+
+        let meetingScore = 0
+        if (titleSim >= 0.7) meetingScore += 0.4
+        else if (titleSim >= 0.5) meetingScore += 0.2
+
+        if (dateMatch) meetingScore += 0.3
+        if (deptOverlap >= 0.7) meetingScore += 0.2
+        else if (deptOverlap >= 0.4) meetingScore += 0.1
+
+        if (matchingTasks.length > 0) {
+          const taskMatchRatio = matchingTasks.length / Math.max(meeting.tasks.length, 1)
+          meetingScore += taskMatchRatio * 0.3
+        }
+
+        if (meetingScore >= 0.5 || matchingTasks.length > 0) {
+          suspectedDuplicates.push({
+            meetingId: existingMeeting.id,
+            title: existingMeeting.title,
+            meetingDate: existingMeeting.meeting_date,
+            departments: existingMeeting.departments,
+            taskCount: existingTasks.length,
+            titleSimilarity: Math.round(titleSim * 100) / 100,
+            dateMatch,
+            deptOverlap: Math.round(deptOverlap * 100) / 100,
+            matchingTasks,
+          })
+        }
+      }
+
+      suspectedDuplicates.sort((a, b) => {
+        const scoreA = a.titleSimilarity * 0.4 + (a.dateMatch ? 0.3 : 0) + a.deptOverlap * 0.2 + (a.matchingTasks.length > 0 ? 0.3 : 0)
+        const scoreB = b.titleSimilarity * 0.4 + (b.dateMatch ? 0.3 : 0) + b.deptOverlap * 0.2 + (b.matchingTasks.length > 0 ? 0.3 : 0)
+        return scoreB - scoreA
+      })
+
+      return {
+        index,
+        title: meeting.title,
+        meetingDate: meeting.meetingDate,
+        departments: meeting.departments,
+        tasks: meeting.tasks,
+        suspectedDuplicates: suspectedDuplicates.slice(0, 5),
+        hasDuplicate: suspectedDuplicates.length > 0,
+      }
+    })
+
+    res.json({
+      success: true,
+      data: { results } as DuplicateCheckResponse,
+    })
+  } catch (error) {
+    console.error('Check duplicates error:', error)
+    res.status(500).json({ success: false, error: '查重检查失败' })
+  }
+})
+
+router.post('/:id/append-tasks', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const { tasks } = req.body as AppendTasksRequest
+
+    const meetingRow = db.prepare('SELECT * FROM meetings WHERE id = ?').get(id) as MeetingRow | undefined
+    if (!meetingRow) {
+      return res.status(404).json({ success: false, error: '会议纪要不存在' })
+    }
+
+    if (!tasks || tasks.length === 0) {
+      return res.status(400).json({ success: false, error: '请提供要追加的事项' })
+    }
+
+    const insertTask = db.prepare(`
+      INSERT INTO tasks (meeting_id, content, department, deadline)
+      VALUES (?, ?, ?, ?)
+    `)
+
+    const insertTaskProgress = db.prepare(`
+      INSERT INTO task_progress (task_id, status, progress, created_at)
+      VALUES (?, 'pending', '', datetime('now', 'localtime'))
+    `)
+
+    const appendedTaskIds: number[] = []
+
+    const transaction = db.transaction(() => {
+      tasks.forEach((task) => {
+        const taskResult = insertTask.run(
+          Number(id),
+          task.content.trim(),
+          task.department,
+          task.deadline
+        )
+        const taskId = taskResult.lastInsertRowid as number
+        insertTaskProgress.run(taskId)
+        appendedTaskIds.push(taskId)
+      })
+    })
+
+    transaction()
+
+    const newTaskRows = db.prepare(`
+      SELECT t.*,
+        EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        ) as has_active_supervision
+      FROM tasks t
+      WHERE t.id IN (${appendedTaskIds.map(() => '?').join(',')})
+      ORDER BY t.id ASC
+    `).all(...appendedTaskIds) as TaskRow[]
+
+    const newTasks = newTaskRows.map(rowToTask)
+
+    res.json({ success: true, data: { meetingId: Number(id), tasks: newTasks } })
+  } catch (error) {
+    console.error('Append tasks error:', error)
+    res.status(500).json({ success: false, error: '追加事项失败' })
+  }
+})
+
+router.post('/batch-import', (req: Request, res: Response) => {
+  try {
+    const { items } = req.body as BatchImportRequest
+
+    if (!items || items.length === 0) {
+      return res.status(400).json({ success: false, error: '请提供导入数据' })
+    }
+
+    const results: BatchImportResultItem[] = []
+    let successCount = 0
+    let failCount = 0
+
+    const insertMeeting = db.prepare(`
+      INSERT INTO meetings (title, departments, meeting_date)
+      VALUES (?, ?, ?)
+    `)
+
+    const insertTask = db.prepare(`
+      INSERT INTO tasks (meeting_id, content, department, deadline)
+      VALUES (?, ?, ?, ?)
+    `)
+
+    const insertTaskProgress = db.prepare(`
+      INSERT INTO task_progress (task_id, status, progress, created_at)
+      VALUES (?, 'pending', '', datetime('now', 'localtime'))
+    `)
+
+    for (const item of items) {
+      const { meeting, decision } = item
+      const validTasks = meeting.tasks.filter(
+        (t) => t.content.trim() && t.department && t.deadline
+      )
+
+      try {
+        if (decision.action === 'skip') {
+          results.push({
+            success: true,
+            action: 'skip',
+            title: meeting.title,
+          })
+          successCount++
+        } else if (decision.action === 'append' && decision.targetMeetingId) {
+          const meetingRow = db.prepare('SELECT * FROM meetings WHERE id = ?').get(
+            decision.targetMeetingId
+          ) as MeetingRow | undefined
+
+          if (!meetingRow) {
+            throw new Error('目标会议不存在')
+          }
+
+          if (validTasks.length === 0) {
+            throw new Error('没有有效的可追加事项')
+          }
+
+          const appendTransaction = db.transaction(() => {
+            validTasks.forEach((task) => {
+              const taskResult = insertTask.run(
+                decision.targetMeetingId!,
+                task.content.trim(),
+                task.department,
+                task.deadline
+              )
+              const taskId = taskResult.lastInsertRowid as number
+              insertTaskProgress.run(taskId)
+            })
+          })
+          appendTransaction()
+
+          results.push({
+            success: true,
+            action: 'append',
+            title: meeting.title,
+            meetingId: decision.targetMeetingId,
+          })
+          successCount++
+        } else if (decision.action === 'create') {
+          if (validTasks.length === 0) {
+            throw new Error('没有有效的议定事项')
+          }
+
+          let newMeetingId: number | undefined
+
+          const createTransaction = db.transaction(() => {
+            const meetingResult = insertMeeting.run(
+              meeting.title.trim(),
+              meeting.departments.trim(),
+              meeting.meetingDate
+            )
+            newMeetingId = meetingResult.lastInsertRowid as number
+
+            validTasks.forEach((task) => {
+              const taskResult = insertTask.run(
+                newMeetingId!,
+                task.content.trim(),
+                task.department,
+                task.deadline
+              )
+              const taskId = taskResult.lastInsertRowid as number
+              insertTaskProgress.run(taskId)
+            })
+          })
+          createTransaction()
+
+          results.push({
+            success: true,
+            action: 'create',
+            title: meeting.title,
+            meetingId: newMeetingId,
+          })
+          successCount++
+        } else {
+          throw new Error('无效的操作类型')
+        }
+      } catch (err) {
+        const e = err as Error
+        results.push({
+          success: false,
+          action: decision.action,
+          title: meeting.title,
+          error: e.message,
+        })
+        failCount++
+      }
+    }
+
+    const response: BatchImportResponse = {
+      total: items.length,
+      successCount,
+      failCount,
+      results,
+    }
+
+    res.json({ success: true, data: response })
+  } catch (error) {
+    console.error('Batch import error:', error)
+    res.status(500).json({ success: false, error: '批量导入失败' })
   }
 })
 
