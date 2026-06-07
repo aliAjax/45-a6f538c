@@ -13,6 +13,7 @@ interface TaskRowWithTitle {
   created_at: string
   updated_at: string
   meeting_title?: string
+  has_active_supervision?: number
 }
 
 function rowToTask(row: TaskRowWithTitle): Task {
@@ -27,6 +28,7 @@ function rowToTask(row: TaskRowWithTitle): Task {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     meetingTitle: row.meeting_title,
+    hasActiveSupervision: !!row.has_active_supervision,
   }
 }
 
@@ -43,7 +45,11 @@ router.get('/', (_req: Request, res: Response) => {
     const threeDaysLaterStr = threeDaysLater.toISOString().split('T')[0]
 
     const allRows = db.prepare(`
-      SELECT t.*, m.title as meeting_title
+      SELECT t.*, m.title as meeting_title,
+        EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        ) as has_active_supervision
       FROM tasks t
       LEFT JOIN meetings m ON t.meeting_id = m.id
       WHERE t.status != 'completed'

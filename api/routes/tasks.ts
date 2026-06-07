@@ -22,6 +22,7 @@ interface TaskRowWithTitle {
   created_at: string
   updated_at: string
   meeting_title?: string
+  has_active_supervision?: number
 }
 
 interface TaskProgressRow {
@@ -56,6 +57,7 @@ function rowToTask(row: TaskRowWithTitle): Task {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     meetingTitle: row.meeting_title,
+    hasActiveSupervision: !!row.has_active_supervision,
   }
 }
 
@@ -100,7 +102,11 @@ router.get('/', (req: Request, res: Response) => {
 
     const offset = (Number(page) - 1) * Number(pageSize)
     const rows = db.prepare(`
-      SELECT t.*, m.title as meeting_title
+      SELECT t.*, m.title as meeting_title,
+        EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        ) as has_active_supervision
       FROM tasks t
       LEFT JOIN meetings m ON t.meeting_id = m.id
       ${whereClause}
@@ -137,7 +143,11 @@ router.get('/overdue', (_req: Request, res: Response) => {
     const today = new Date().toISOString().split('T')[0]
 
     const rows = db.prepare(`
-      SELECT t.*, m.title as meeting_title
+      SELECT t.*, m.title as meeting_title,
+        EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        ) as has_active_supervision
       FROM tasks t
       LEFT JOIN meetings m ON t.meeting_id = m.id
       WHERE t.status != 'completed' AND t.deadline < ?
@@ -159,7 +169,11 @@ router.get('/this-week', (_req: Request, res: Response) => {
     const today = new Date().toISOString().split('T')[0]
 
     const rows = db.prepare(`
-      SELECT t.*, m.title as meeting_title
+      SELECT t.*, m.title as meeting_title,
+        EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        ) as has_active_supervision
       FROM tasks t
       LEFT JOIN meetings m ON t.meeting_id = m.id
       WHERE t.status != 'completed'
@@ -202,7 +216,11 @@ router.get('/calendar', (req: Request, res: Response) => {
     }
 
     const rows = db.prepare(`
-      SELECT t.*, m.title as meeting_title
+      SELECT t.*, m.title as meeting_title,
+        EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        ) as has_active_supervision
       FROM tasks t
       LEFT JOIN meetings m ON t.meeting_id = m.id
       ${whereClause}
@@ -300,7 +318,11 @@ router.patch('/:id', (req: Request, res: Response) => {
     })()
 
     const updatedRow = db.prepare(`
-      SELECT t.*, m.title as meeting_title
+      SELECT t.*, m.title as meeting_title,
+        EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        ) as has_active_supervision
       FROM tasks t
       LEFT JOIN meetings m ON t.meeting_id = m.id
       WHERE t.id = ?
@@ -418,7 +440,11 @@ router.patch('/batch/update', (req: Request, res: Response) => {
         updateTransaction()
 
         const updatedRow = db.prepare(`
-          SELECT t.*, m.title as meeting_title
+          SELECT t.*, m.title as meeting_title,
+            EXISTS (
+              SELECT 1 FROM task_supervisions ts
+              WHERE ts.task_id = t.id AND ts.status = 'active'
+            ) as has_active_supervision
           FROM tasks t
           LEFT JOIN meetings m ON t.meeting_id = m.id
           WHERE t.id = ?
@@ -456,7 +482,11 @@ router.get('/workbench/:department', (req: Request, res: Response) => {
     const { start, end } = getThisWeekRange()
 
     const pendingRows = db.prepare(`
-      SELECT t.*, m.title as meeting_title
+      SELECT t.*, m.title as meeting_title,
+        EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        ) as has_active_supervision
       FROM tasks t
       LEFT JOIN meetings m ON t.meeting_id = m.id
       WHERE t.department = ?
@@ -466,7 +496,11 @@ router.get('/workbench/:department', (req: Request, res: Response) => {
     `).all(department, today) as TaskRowWithTitle[]
 
     const overdueRows = db.prepare(`
-      SELECT t.*, m.title as meeting_title
+      SELECT t.*, m.title as meeting_title,
+        EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        ) as has_active_supervision
       FROM tasks t
       LEFT JOIN meetings m ON t.meeting_id = m.id
       WHERE t.department = ?
@@ -476,7 +510,11 @@ router.get('/workbench/:department', (req: Request, res: Response) => {
     `).all(department, today) as TaskRowWithTitle[]
 
     const dueThisWeekRows = db.prepare(`
-      SELECT t.*, m.title as meeting_title
+      SELECT t.*, m.title as meeting_title,
+        EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        ) as has_active_supervision
       FROM tasks t
       LEFT JOIN meetings m ON t.meeting_id = m.id
       WHERE t.department = ?
@@ -488,7 +526,11 @@ router.get('/workbench/:department', (req: Request, res: Response) => {
     `).all(department, start, end, today) as TaskRowWithTitle[]
 
     const completedRows = db.prepare(`
-      SELECT t.*, m.title as meeting_title
+      SELECT t.*, m.title as meeting_title,
+        EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        ) as has_active_supervision
       FROM tasks t
       LEFT JOIN meetings m ON t.meeting_id = m.id
       WHERE t.department = ?

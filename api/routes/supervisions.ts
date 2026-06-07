@@ -139,9 +139,23 @@ router.post('/', (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '督办说明不能为空' })
     }
 
-    const taskRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId)
+    const taskRow = db.prepare('SELECT * FROM tasks WHERE id = ?').get(taskId) as { id: number; status: string } | undefined
     if (!taskRow) {
       return res.status(404).json({ success: false, error: '事项不存在' })
+    }
+
+    if (taskRow.status === 'completed') {
+      return res.status(400).json({ success: false, error: '已完成的事项不能发起督办' })
+    }
+
+    const activeSupervision = db.prepare(`
+      SELECT id FROM task_supervisions
+      WHERE task_id = ? AND status = 'active'
+      LIMIT 1
+    `).get(taskId) as { id: number } | undefined
+
+    if (activeSupervision) {
+      return res.status(400).json({ success: false, error: '该事项已有督办在进行中' })
     }
 
     const result = db.prepare(`

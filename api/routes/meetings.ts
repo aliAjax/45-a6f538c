@@ -30,6 +30,7 @@ interface TaskRow {
   progress: string | null
   created_at: string
   updated_at: string
+  has_active_supervision?: number
 }
 
 const router = Router()
@@ -56,6 +57,7 @@ function rowToTask(row: TaskRow): Task {
     progress: row.progress || '',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    hasActiveSupervision: !!row.has_active_supervision,
   }
 }
 
@@ -105,7 +107,16 @@ router.get('/:id', (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: '会议纪要不存在' })
     }
 
-    const taskRows = db.prepare('SELECT * FROM tasks WHERE meeting_id = ? ORDER BY id ASC').all(id) as TaskRow[]
+    const taskRows = db.prepare(`
+      SELECT t.*,
+        EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        ) as has_active_supervision
+      FROM tasks t
+      WHERE t.meeting_id = ?
+      ORDER BY t.id ASC
+    `).all(id) as TaskRow[]
 
     const meeting = rowToMeeting(meetingRow)
     meeting.tasks = taskRows.map(rowToTask)
@@ -154,7 +165,16 @@ router.post('/', (req: Request, res: Response) => {
     })()
 
     const meetingRow = db.prepare('SELECT * FROM meetings WHERE id = ?').get(result) as MeetingRow
-    const taskRows = db.prepare('SELECT * FROM tasks WHERE meeting_id = ? ORDER BY id ASC').all(result) as TaskRow[]
+    const taskRows = db.prepare(`
+      SELECT t.*,
+        EXISTS (
+          SELECT 1 FROM task_supervisions ts
+          WHERE ts.task_id = t.id AND ts.status = 'active'
+        ) as has_active_supervision
+      FROM tasks t
+      WHERE t.meeting_id = ?
+      ORDER BY t.id ASC
+    `).all(result) as TaskRow[]
 
     const meeting = rowToMeeting(meetingRow)
     meeting.tasks = taskRows.map(rowToTask)
