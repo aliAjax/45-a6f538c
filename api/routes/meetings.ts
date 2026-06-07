@@ -173,21 +173,106 @@ function addDays(dateStr: string, days: number): string {
 }
 
 function normalizeDate(dateStr: string): string {
+  if (!dateStr || !dateStr.trim()) return ''
+
   const cleaned = dateStr.trim().replace(/年|月/g, '-').replace(/日/g, '')
   const date = new Date(cleaned)
   if (isNaN(date.getTime())) {
     return ''
   }
+
   const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+  const month = date.getMonth() + 1
+  const day = date.getDate()
+
+  const isoMatch = cleaned.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
+  const cnMatch = dateStr.trim().match(/^(\d{4})年(\d{1,2})月(\d{1,2})日/)
+  const match = isoMatch || cnMatch
+
+  if (match) {
+    const inputYear = parseInt(match[1], 10)
+    const inputMonth = parseInt(match[2], 10)
+    const inputDay = parseInt(match[3], 10)
+    if (
+      inputYear !== year ||
+      inputMonth !== month ||
+      inputDay !== day
+    ) {
+      return ''
+    }
+  }
+
+  if (year < 1900 || year > 2100) return ''
+  if (month < 1 || month > 12) return ''
+  if (day < 1 || day > 31) return ''
+
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
 function isValidDate(dateStr: string): boolean {
   if (!dateStr) return false
-  const date = new Date(dateStr)
-  return !isNaN(date.getTime())
+  const normalized = normalizeDate(dateStr)
+  if (!normalized) return false
+
+  const [yearStr, monthStr, dayStr] = normalized.split('-')
+  const year = parseInt(yearStr, 10)
+  const month = parseInt(monthStr, 10)
+  const day = parseInt(dayStr, 10)
+
+  const date = new Date(year, month - 1, day)
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day
+  )
+}
+
+function normalizeDateTime(dateTimeStr: string): string {
+  if (!dateTimeStr || !dateTimeStr.trim()) return ''
+
+  const trimmed = dateTimeStr.trim()
+
+  const fullPatterns = [
+    /^(\d{4})[-年](\d{1,2})[-月](\d{1,2})[日\s]*[ T]?(\d{1,2}):(\d{2})(?::(\d{2}))?/,
+  ]
+
+  for (const pattern of fullPatterns) {
+    const match = trimmed.match(pattern)
+    if (match) {
+      const year = parseInt(match[1], 10)
+      const month = parseInt(match[2], 10)
+      const day = parseInt(match[3], 10)
+      const hours = parseInt(match[4], 10)
+      const minutes = parseInt(match[5], 10)
+
+      if (month < 1 || month > 12) return ''
+      if (day < 1 || day > 31) return ''
+      if (hours < 0 || hours > 23) return ''
+      if (minutes < 0 || minutes > 59) return ''
+
+      const date = new Date(year, month - 1, day)
+      if (
+        date.getFullYear() !== year ||
+        date.getMonth() !== month - 1 ||
+        date.getDate() !== day
+      ) {
+        return ''
+      }
+
+      const mm = String(month).padStart(2, '0')
+      const dd = String(day).padStart(2, '0')
+      const hh = String(hours).padStart(2, '0')
+      const min = String(minutes).padStart(2, '0')
+      return `${year}-${mm}-${dd}T${hh}:${min}`
+    }
+  }
+
+  const dateOnly = normalizeDate(trimmed)
+  if (dateOnly) {
+    return `${dateOnly}T09:00`
+  }
+
+  return ''
 }
 
 function deduplicateDepartments(departments: string): string {
@@ -379,7 +464,7 @@ function parseSingleMeeting(text: string): ParsedMeeting {
   }
 
   if (meetingDate) {
-    const normalized = normalizeDate(meetingDate)
+    const normalized = normalizeDateTime(meetingDate)
     if (normalized) {
       meetingDate = normalized
     } else {

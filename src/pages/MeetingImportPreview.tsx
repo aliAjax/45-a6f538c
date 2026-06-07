@@ -23,6 +23,47 @@ interface MeetingFormData {
   tasks: ParsedTask[]
 }
 
+function isValidDate(dateStr: string): boolean {
+  if (!dateStr) return false
+  const match = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return false
+  const year = parseInt(match[1], 10)
+  const month = parseInt(match[2], 10)
+  const day = parseInt(match[3], 10)
+  const date = new Date(year, month - 1, day)
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day
+  )
+}
+
+function isValidDateTime(dateTimeStr: string): boolean {
+  if (!dateTimeStr) return false
+  const match = dateTimeStr.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/)
+  if (!match) return false
+  const year = parseInt(match[1], 10)
+  const month = parseInt(match[2], 10)
+  const day = parseInt(match[3], 10)
+  const hours = parseInt(match[4], 10)
+  const minutes = parseInt(match[5], 10)
+  if (hours < 0 || hours > 23) return false
+  if (minutes < 0 || minutes > 59) return false
+  const date = new Date(year, month - 1, day)
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day
+  )
+}
+
+function ensureDateTimeFormat(dateStr: string): string {
+  if (!dateStr) return ''
+  if (isValidDateTime(dateStr)) return dateStr
+  if (isValidDate(dateStr)) return `${dateStr}T09:00`
+  return dateStr
+}
+
 export default function MeetingImportPreview() {
   const navigate = useNavigate()
   const { createMeeting, departments, fetchDepartments, loading } = useAppStore()
@@ -39,8 +80,16 @@ export default function MeetingImportPreview() {
     if (stored) {
       try {
         const parsed = JSON.parse(stored) as MeetingFormData[]
-        setMeetings(parsed)
-        setExpandedMeetings(new Set(parsed.map((_, i) => i)))
+        const normalized = parsed.map((m) => ({
+          ...m,
+          meetingDate: ensureDateTimeFormat(m.meetingDate),
+          tasks: m.tasks.map((t) => ({
+            ...t,
+            deadline: isValidDate(t.deadline) ? t.deadline : '',
+          })),
+        }))
+        setMeetings(normalized)
+        setExpandedMeetings(new Set(normalized.map((_, i) => i)))
       } catch {
         setError('数据加载失败，请重新导入')
       }
@@ -130,9 +179,11 @@ export default function MeetingImportPreview() {
     }
     if (!meeting.meetingDate) {
       errors.push('会议时间不能为空')
+    } else if (!isValidDateTime(meeting.meetingDate)) {
+      errors.push('会议时间格式无效')
     }
     const validTasks = meeting.tasks.filter(
-      (t) => t.content.trim() && t.department && t.deadline
+      (t) => t.content.trim() && t.department && t.deadline && isValidDate(t.deadline)
     )
     if (validTasks.length === 0) {
       errors.push('至少需要一条完整的议定事项')
@@ -167,7 +218,7 @@ export default function MeetingImportPreview() {
     for (let i = 0; i < meetings.length; i++) {
       const meeting = meetings[i]
       const validTasks = meeting.tasks.filter(
-        (t) => t.content.trim() && t.department && t.deadline
+        (t) => t.content.trim() && t.department && t.deadline && isValidDate(t.deadline)
       )
 
       try {
