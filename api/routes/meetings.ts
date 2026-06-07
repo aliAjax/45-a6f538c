@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import db from '../db.js'
-import type { Meeting, Task, CreateMeetingRequest } from '../../shared/types.js'
+import type { Meeting, Task, CreateMeetingRequest, MeetingReviewStats } from '../../shared/types.js'
 
 interface MeetingRow {
   id: number
@@ -154,6 +154,101 @@ router.post('/', (req: Request, res: Response) => {
   } catch (error) {
     console.error('Create meeting error:', error)
     res.status(500).json({ success: false, error: '创建会议纪要失败' })
+  }
+})
+
+router.get('/review/stats', (req: Request, res: Response) => {
+  try {
+    const { startDate, endDate, search, page = '1', pageSize = '10' } = req.query
+
+    const today = new Date().toISOString().split('T')[0]
+
+    const whereConditions: string[] = []
+    const params: (string | number)[] = []
+
+    if (startDate) {
+      whereConditions.push('m.meeting_date >= ?')
+      params.push(String(startDate))
+    }
+    if (endDate) {
+      whereConditions.push('m.meeting_date <= ?')
+      params.push(String(endDate))
+    }
+    if (search) {
+      whereConditions.push('m.title LIKE ?')
+      params.push(`%${search}%`)
+    }
+
+    const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : ''
+
+    const countSql = `
+      SELECT COUNT(DISTINCT m.id) as count
+      FROM meetings m
+      ${whereClause}
+    `
+    const countRow = db.prepare(countSql).get(...params) as { count: number }
+    const total = countRow.count
+
+    const offset = (Number(page) - 1) * Number(pageSize)
+
+    const statsSql = `
+      SELECT
+        m.id as meetingId,
+        m.title as meetingTitle,
+        m.meeting_date as meetingDate,
+        m.departments as departments,
+        COUNT(t.id) as totalTasks,
+        SUM(CASE WHEN t.status = 'completed' THEN 1 ELSE 0 END) as completedTasks,
+        SUM(CASE WHEN t.status = 'pending' THEN 1 ELSE 0 END) as pendingTasks,
+        SUM(CASE WHEN t.status = 'in_progress' THEN 1 ELSE 0 END) as inProgressTasks,
+        SUM(CASE WHEN t.status != 'completed' AND t.deadline < ? THEN 1 ELSE 0 END) as overdueTasks
+      FROM meetings m
+      LEFT JOIN tasks t ON m.id = t.meeting_id
+      ${whereClause}
+      GROUP BY m.id
+      ORDER BY m.meeting_date DESC, m.id DESC
+      LIMIT ? OFFSET ?
+    `
+
+    const statsRows = db.prepare(statsSql).all(today, ...params, Number(pageSize), offset) as Array<{
+      meetingId: number
+      meetingTitle: string
+      meetingDate: string
+      departments: string
+      totalTasks: number
+      completedTasks: number
+      pendingTasks: number
+      inProgressTasks: number
+      overdueTasks: number
+    }>
+
+    const list: MeetingReviewStats[] = statsRows.map((row) => ({
+      meetingId: row.meetingId,
+      meetingTitle: row.meetingTitle,
+      meetingDate: row.meetingDate,
+      departments: row.departments,
+      totalTasks: row.totalTasks,
+      completedTasks: row.completedTasks,
+      pendingTasks: row.pendingTasks,
+      inProgressTasks: row.inProgressTasks,
+      overdueTasks: row.overdueTasks,
+      completionRate: row.totalTasks > 0
+        ? Math.round((row.completedTasks / row.totalTasks) * 100)
+        : 0,
+    }))
+
+    res.json({
+      success: true,
+      data: {
+        list,
+        total,
+        page: Number(page),
+        pageSize: Number(pageSize),
+      },
+    })
+  } catch (error) {
+    console.error('Get meeting review stats error:', error)
+    res.status(500).json({ success: false, error: '获取会议复盘统计失败' })
   }
 })
 

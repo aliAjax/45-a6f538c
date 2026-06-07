@@ -129,3 +129,16 @@ export interface ReminderGroups {
   today: Task[]
   nextThreeDays: Task[]
 }
+
+export interface MeetingReviewStats {
+  meetingId: number
+  meetingTitle: string
+  meetingDate: string
+  departments: string
+  totalTasks: number
+  completedTasks: number
+  pendingTasks: number
+  inProgressTasks: number
+  overdueTasks: number
+  completionRate: number
+}

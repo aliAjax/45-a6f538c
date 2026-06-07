@@ -14,6 +14,7 @@ import type {
   DepartmentStats,
   CalendarMonthData,
   ReminderGroups,
+  MeetingReviewStats,
 } from '../../shared/types'
 import api from '../utils/api'
 
@@ -37,6 +38,8 @@ interface AppState {
   templates: MeetingTemplate[]
   calendarData: CalendarMonthData | null
   reminderGroups: ReminderGroups | null
+  meetingReviewList: MeetingReviewStats[]
+  meetingReviewTotal: number
   loading: boolean
   error: string | null
 
@@ -62,6 +65,7 @@ interface AppState {
   createTemplate: (data: CreateTemplateRequest) => Promise<MeetingTemplate>
   deleteTemplate: (id: number) => Promise<void>
   fetchReminders: () => Promise<void>
+  fetchMeetingReviewStats: (page?: number, pageSize?: number, startDate?: string, endDate?: string, search?: string) => Promise<void>
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -79,6 +83,8 @@ export const useAppStore = create<AppState>((set) => ({
   templates: [],
   calendarData: null,
   reminderGroups: null,
+  meetingReviewList: [],
+  meetingReviewTotal: 0,
   loading: false,
   error: null,
 
@@ -353,6 +359,25 @@ export const useAppStore = create<AppState>((set) => ({
     try {
       const groups = await api.get<ReminderGroups>('/reminders')
       set({ reminderGroups: groups, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+    }
+  },
+
+  fetchMeetingReviewStats: async (page = 1, pageSize = 10, startDate?, endDate?, search?) => {
+    set({ loading: true, error: null })
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+      })
+      if (startDate) params.append('startDate', startDate)
+      if (endDate) params.append('endDate', endDate)
+      if (search) params.append('search', search)
+      const result = await api.get<{ list: MeetingReviewStats[]; total: number }>(
+        `/meetings/review/stats?${params}`
+      )
+      set({ meetingReviewList: result.list, meetingReviewTotal: result.total, loading: false })
     } catch (error) {
       set({ error: getErrorMessage(error), loading: false })
     }
