@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { X, CheckCircle, Clock, AlertCircle, BellRing, Plus, XCircle, CalendarDays } from 'lucide-react'
+import { X, CheckCircle, Clock, AlertCircle, BellRing, Plus, XCircle, CalendarDays, MessageSquare } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
-import type { Task, TaskProgress, TaskSupervision } from '../../shared/types'
+import type { Task, TaskProgress, TaskSupervision, SupervisionFollowUp } from '../../shared/types'
 import { cn } from '../lib/utils'
 import ProgressTimeline from './ProgressTimeline'
 
@@ -20,6 +20,8 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
   const fetchTaskSupervisions = useAppStore((state) => state.fetchTaskSupervisions)
   const createSupervision = useAppStore((state) => state.createSupervision)
   const closeSupervision = useAppStore((state) => state.closeSupervision)
+  const addSupervisionFollowUp = useAppStore((state) => state.addSupervisionFollowUp)
+  const fetchSupervisionFollowUps = useAppStore((state) => state.fetchSupervisionFollowUps)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [progressList, setProgressList] = useState<TaskProgress[]>([])
@@ -31,6 +33,12 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
   const [nextFollowUpDate, setNextFollowUpDate] = useState('')
   const [submittingSupervision, setSubmittingSupervision] = useState(false)
   const [activeTab, setActiveTab] = useState<'progress' | 'supervision'>('progress')
+  const [showFollowUpForm, setShowFollowUpForm] = useState(false)
+  const [followUpContent, setFollowUpContent] = useState('')
+  const [followUpNextDate, setFollowUpNextDate] = useState('')
+  const [submittingFollowUp, setSubmittingFollowUp] = useState(false)
+  const [followUpList, setFollowUpList] = useState<SupervisionFollowUp[]>([])
+  const [loadingFollowUps, setLoadingFollowUps] = useState(false)
 
   const loadProgressList = useCallback(async (taskId: number) => {
     setLoadingProgress(true)
@@ -44,17 +52,35 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
     }
   }, [fetchTaskProgress])
 
+  const loadFollowUpList = useCallback(async (supervisionId: number) => {
+    setLoadingFollowUps(true)
+    try {
+      const list = await fetchSupervisionFollowUps(supervisionId)
+      setFollowUpList(list)
+    } catch (err) {
+      console.error('Failed to load follow-up list:', err)
+    } finally {
+      setLoadingFollowUps(false)
+    }
+  }, [fetchSupervisionFollowUps])
+
   const loadSupervisionList = useCallback(async (taskId: number) => {
     setLoadingSupervisions(true)
     try {
       const list = await fetchTaskSupervisions(taskId)
       setSupervisionList(list)
+      const active = list.find((s) => s.status === 'active')
+      if (active) {
+        loadFollowUpList(active.id)
+      } else {
+        setFollowUpList([])
+      }
     } catch (err) {
       console.error('Failed to load supervision list:', err)
     } finally {
       setLoadingSupervisions(false)
     }
-  }, [fetchTaskSupervisions])
+  }, [fetchTaskSupervisions, loadFollowUpList])
 
   useEffect(() => {
     if (task) {
@@ -64,6 +90,9 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
       setSuperviseNote('')
       setNextFollowUpDate('')
       setShowSuperviseForm(false)
+      setShowFollowUpForm(false)
+      setFollowUpContent('')
+      setFollowUpNextDate('')
       loadProgressList(task.id)
       loadSupervisionList(task.id)
     }
@@ -126,6 +155,34 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
     } catch (err) {
       const error = err as Error
       setError(error.message || '关闭督办失败')
+    }
+  }
+
+  const handleAddFollowUp = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!followUpContent.trim()) return
+
+    const activeSupervision = supervisionList.find((s) => s.status === 'active')
+    if (!activeSupervision) return
+
+    setSubmittingFollowUp(true)
+    setError('')
+
+    try {
+      await addSupervisionFollowUp(activeSupervision.id, {
+        content: followUpContent.trim(),
+        nextFollowUpDate: followUpNextDate || undefined,
+      })
+      setFollowUpContent('')
+      setFollowUpNextDate('')
+      setShowFollowUpForm(false)
+      await loadSupervisionList(task.id)
+      onUpdated?.()
+    } catch (err) {
+      const error = err as Error
+      setError(error.message || '添加跟进失败')
+    } finally {
+      setSubmittingFollowUp(false)
     }
   }
 
@@ -205,13 +262,37 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
                 <div className="flex items-center gap-2 mb-2">
                   <BellRing className="w-4 h-4 text-rose-600" />
                   <span className="text-sm font-medium text-rose-700">当前督办中</span>
+                  {activeSupervision.followUpCount !== undefined && (
+                    <span className="text-xs text-rose-500 bg-rose-100 px-1.5 py-0.5 rounded">
+                      {activeSupervision.followUpCount} 次跟进
+                    </span>
+                  )}
                 </div>
-                <p className="text-sm text-rose-600 mb-2">{activeSupervision.note}</p>
-                {activeSupervision.nextFollowUpDate && (
-                  <div className="flex items-center gap-1 text-xs text-rose-500">
-                    <CalendarDays className="w-3.5 h-3.5" />
-                    下次跟进：{activeSupervision.nextFollowUpDate}
-                  </div>
+                {activeSupervision.latestFollowUp ? (
+                  <>
+                    <p className="text-sm text-rose-600 mb-2">
+                      {activeSupervision.latestFollowUp.content}
+                    </p>
+                    {activeSupervision.latestFollowUp.nextFollowUpDate && (
+                      <div className="flex items-center gap-1 text-xs text-rose-500">
+                        <CalendarDays className="w-3.5 h-3.5" />
+                        下次跟进：{activeSupervision.latestFollowUp.nextFollowUpDate}
+                      </div>
+                    )}
+                    <p className="text-xs text-rose-400 mt-1">
+                      最近跟进：{activeSupervision.latestFollowUp.createdAt}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-rose-600 mb-2">{activeSupervision.note}</p>
+                    {activeSupervision.nextFollowUpDate && (
+                      <div className="flex items-center gap-1 text-xs text-rose-500">
+                        <CalendarDays className="w-3.5 h-3.5" />
+                        下次跟进：{activeSupervision.nextFollowUpDate}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -410,6 +491,63 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
                     </div>
                   )}
 
+                  {hasActiveSupervision && activeSupervision && task.status !== 'completed' && (
+                    <div className="mb-3">
+                      {!showFollowUpForm ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowFollowUpForm(true)
+                            if (activeSupervision.latestFollowUp?.nextFollowUpDate) {
+                              setFollowUpNextDate(activeSupervision.latestFollowUp.nextFollowUpDate)
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-rose-50 text-rose-600 text-xs font-medium rounded-lg hover:bg-rose-100 transition-colors"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          追加跟进
+                        </button>
+                      ) : (
+                        <div className="p-3 bg-rose-50 rounded-xl border border-rose-100">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium text-rose-700">追加跟进记录</span>
+                            <button
+                              type="button"
+                              onClick={() => setShowFollowUpForm(false)}
+                              className="text-rose-400 hover:text-rose-600 transition-colors"
+                            >
+                              <XCircle className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <textarea
+                            value={followUpContent}
+                            onChange={(e) => setFollowUpContent(e.target.value)}
+                            placeholder="请输入跟进内容..."
+                            className="w-full px-3 py-2 border border-rose-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent resize-none bg-white"
+                            rows={3}
+                          />
+                          <div className="mt-2">
+                            <label className="text-xs text-rose-600 block mb-1">调整下次跟进日期（可选）</label>
+                            <input
+                              type="date"
+                              value={followUpNextDate}
+                              onChange={(e) => setFollowUpNextDate(e.target.value)}
+                              className="w-full px-3 py-2 border border-rose-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent bg-white"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleAddFollowUp}
+                            disabled={!followUpContent.trim() || submittingFollowUp}
+                            className="mt-3 w-full py-2 bg-rose-600 text-white text-sm font-medium rounded-lg hover:bg-rose-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {submittingFollowUp ? '提交中...' : '确认跟进'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {loadingSupervisions ? (
                     <div className="py-6 text-center text-sm text-slate-500">
                       加载中...
@@ -420,7 +558,7 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
                       <p className="text-sm text-slate-400">暂无督办记录</p>
                     </div>
                   ) : (
-                    <div className="max-h-48 overflow-y-auto pr-1 space-y-2">
+                    <div className="space-y-3">
                       {supervisionList.map((supervision) => (
                         <div
                           key={supervision.id}
@@ -431,7 +569,7 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
                               : 'bg-slate-50 border-slate-200'
                           )}
                         >
-                          <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center justify-between mb-2">
                             <div className="flex items-center gap-1.5">
                               <BellRing
                                 className={cn(
@@ -451,6 +589,11 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
                               >
                                 {supervision.status === 'active' ? '督办中' : '已关闭'}
                               </span>
+                              {supervision.followUpCount !== undefined && (
+                                <span className="text-xs text-slate-400">
+                                  · {supervision.followUpCount} 次跟进
+                                </span>
+                              )}
                             </div>
                             {supervision.status === 'active' &&
                               task.status !== 'completed' && (
@@ -463,19 +606,76 @@ export default function TaskUpdateModal({ task, isOpen, onClose, onUpdated }: Ta
                                 </button>
                               )}
                           </div>
-                          <p className="text-sm text-slate-600 mb-2">{supervision.note}</p>
-                          <div className="flex items-center justify-between text-xs text-slate-400">
-                            <span>{supervision.createdAt}</span>
-                            {supervision.nextFollowUpDate && (
-                              <span className="flex items-center gap-1">
-                                <CalendarDays className="w-3 h-3" />
-                                跟进：{supervision.nextFollowUpDate}
-                              </span>
+
+                          {supervision.status === 'active' && supervision.latestFollowUp
+                            ? (
+                              <div className="mb-2">
+                                <p className="text-sm text-rose-600 mb-1">
+                                  {supervision.latestFollowUp.content}
+                                </p>
+                                {supervision.latestFollowUp.nextFollowUpDate && (
+                                  <div className="flex items-center gap-1 text-xs text-rose-500">
+                                    <CalendarDays className="w-3 h-3" />
+                                    下次跟进：{supervision.latestFollowUp.nextFollowUpDate}
+                                  </div>
+                                )}
+                                <p className="text-xs text-rose-400 mt-1">
+                                  最近跟进：{supervision.latestFollowUp.createdAt}
+                                </p>
+                              </div>
+                            )
+                            : (
+                              <p className="text-sm text-slate-600 mb-2">{supervision.note}</p>
                             )}
+
+                          <div className="flex items-center justify-between text-xs text-slate-400">
+                            <span>发起时间：{supervision.createdAt}</span>
                           </div>
                           {supervision.closedAt && supervision.status === 'closed' && (
                             <div className="mt-1 text-xs text-slate-400">
                               关闭时间：{supervision.closedAt}
+                            </div>
+                          )}
+
+                          {supervision.status === 'active' && loadingFollowUps && (
+                            <div className="mt-3 pt-2 border-t border-rose-200">
+                              <p className="text-xs text-rose-400">加载跟进记录中...</p>
+                            </div>
+                          )}
+
+                          {supervision.status === 'active' && !loadingFollowUps && followUpList.length > 1 && (
+                            <div className="mt-3 pt-2 border-t border-rose-200">
+                              <p className="text-xs font-medium text-rose-600 mb-2">跟进记录</p>
+                              <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                                {followUpList.map((followUp, index) => (
+                                  <div
+                                    key={followUp.id}
+                                    className={cn(
+                                      'pl-3 border-l-2 relative',
+                                      index === 0 ? 'border-rose-400' : 'border-rose-200'
+                                    )}
+                                  >
+                                    <div
+                                      className={cn(
+                                        'absolute -left-1.5 top-0 w-3 h-3 rounded-full',
+                                        index === 0 ? 'bg-rose-500' : 'bg-rose-200'
+                                      )}
+                                    />
+                                    <p className="text-xs text-rose-700 mb-0.5">
+                                      {followUp.content}
+                                    </p>
+                                    <div className="flex items-center gap-2 text-xs text-rose-400">
+                                      <span>{followUp.createdAt}</span>
+                                      {followUp.nextFollowUpDate && (
+                                        <span className="flex items-center gap-0.5">
+                                          <CalendarDays className="w-3 h-3" />
+                                          {followUp.nextFollowUpDate}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
                           )}
                         </div>

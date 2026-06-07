@@ -110,6 +110,18 @@ function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_task_supervisions_task_id ON task_supervisions(task_id);
     CREATE INDEX IF NOT EXISTS idx_task_supervisions_status ON task_supervisions(status);
     CREATE INDEX IF NOT EXISTS idx_task_supervisions_next_follow_up_date ON task_supervisions(next_follow_up_date);
+
+    CREATE TABLE IF NOT EXISTS supervision_follow_ups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      supervision_id INTEGER NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      next_follow_up_date TEXT,
+      created_at TEXT DEFAULT (datetime('now', 'localtime')),
+      FOREIGN KEY (supervision_id) REFERENCES task_supervisions(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_supervision_follow_ups_supervision_id ON supervision_follow_ups(supervision_id);
+    CREATE INDEX IF NOT EXISTS idx_supervision_follow_ups_created_at ON supervision_follow_ups(created_at);
   `)
 
   const meetingCount = db.prepare('SELECT COUNT(*) as count FROM meetings').get() as { count: number }
@@ -259,6 +271,7 @@ function initDatabase() {
   }
 
   migrateTaskProgress()
+  migrateSupervisionFollowUps()
 }
 
 function migrateTaskProgress() {
@@ -293,6 +306,41 @@ function migrateTaskProgress() {
     })
 
     transaction(tasksWithoutProgress)
+  }
+}
+
+function migrateSupervisionFollowUps() {
+  const supervisionsWithoutFollowUps = db.prepare(`
+    SELECT s.id, s.note, s.next_follow_up_date, s.created_at
+    FROM task_supervisions s
+    WHERE NOT EXISTS (
+      SELECT 1 FROM supervision_follow_ups f WHERE f.supervision_id = s.id
+    )
+  `).all() as Array<{
+    id: number
+    note: string
+    next_follow_up_date: string | null
+    created_at: string
+  }>
+
+  if (supervisionsWithoutFollowUps.length > 0) {
+    const insertFollowUp = db.prepare(`
+      INSERT INTO supervision_follow_ups (supervision_id, content, next_follow_up_date, created_at)
+      VALUES (?, ?, ?, ?)
+    `)
+
+    const transaction = db.transaction((supervisions: typeof supervisionsWithoutFollowUps) => {
+      for (const supervision of supervisions) {
+        insertFollowUp.run(
+          supervision.id,
+          supervision.note || '',
+          supervision.next_follow_up_date,
+          supervision.created_at
+        )
+      }
+    })
+
+    transaction(supervisionsWithoutFollowUps)
   }
 }
 

@@ -4,7 +4,9 @@ import type {
   Task,
   TaskProgress,
   TaskSupervision,
+  SupervisionFollowUp,
   CreateSupervisionRequest,
+  CreateSupervisionFollowUpRequest,
   Stats,
   CreateMeetingRequest,
   UpdateTaskRequest,
@@ -78,6 +80,8 @@ interface AppState {
   fetchTaskSupervisions: (taskId: number) => Promise<TaskSupervision[]>
   createSupervision: (data: CreateSupervisionRequest) => Promise<TaskSupervision>
   closeSupervision: (id: number) => Promise<TaskSupervision>
+  fetchSupervisionFollowUps: (supervisionId: number) => Promise<SupervisionFollowUp[]>
+  addSupervisionFollowUp: (supervisionId: number, data: CreateSupervisionFollowUpRequest) => Promise<SupervisionFollowUp>
   fetchSupervisingTasks: () => Promise<void>
   fetchTemplates: () => Promise<void>
   fetchTemplateDetail: (id: number) => Promise<MeetingTemplate | null>
@@ -415,6 +419,30 @@ export const useAppStore = create<AppState>((set, get) => ({
       const { fetchSupervisingTasks } = get()
       fetchSupervisingTasks()
       return supervision
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  fetchSupervisionFollowUps: async (supervisionId: number) => {
+    try {
+      const followUps = await api.get<SupervisionFollowUp[]>(`/supervisions/${supervisionId}/follow-ups`)
+      return followUps
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+  },
+
+  addSupervisionFollowUp: async (supervisionId: number, data: CreateSupervisionFollowUpRequest) => {
+    set({ loading: true, error: null })
+    try {
+      const followUp = await api.post<SupervisionFollowUp>(`/supervisions/${supervisionId}/follow-ups`, data)
+      set({ loading: false })
+      const { fetchSupervisingTasks } = get()
+      fetchSupervisingTasks()
+      return followUp
     } catch (error) {
       set({ error: getErrorMessage(error), loading: false })
       throw error

@@ -6,6 +6,7 @@ import {
   Bell,
   RefreshCw,
   Inbox,
+  BellRing,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import type { Task } from '../../shared/types'
@@ -91,9 +92,17 @@ export default function ReminderPanel({ isOpen, onClose }: ReminderPanelProps) {
           typeStyles[type]
         )}
       >
-        <p className="text-sm font-medium text-slate-800 line-clamp-2 mb-1">
-          {task.content}
-        </p>
+        <div className="flex items-start gap-2 mb-1">
+          <p className="text-sm font-medium text-slate-800 line-clamp-2 flex-1">
+            {task.content}
+          </p>
+          {task.hasActiveSupervision && (
+            <span className="inline-flex items-center gap-0.5 px-1 py-0.5 bg-rose-100 text-rose-600 text-[10px] font-medium rounded flex-shrink-0">
+              <BellRing className="w-2.5 h-2.5" />
+              督办
+            </span>
+          )}
+        </div>
         <div className="flex items-center justify-between text-xs">
           <span className="text-slate-500 truncate max-w-[50%]">
             {task.department}
@@ -116,6 +125,11 @@ export default function ReminderPanel({ isOpen, onClose }: ReminderPanelProps) {
         {task.meetingTitle && (
           <p className="text-xs text-slate-400 mt-1 truncate">
             来源：{task.meetingTitle}
+          </p>
+        )}
+        {task.activeSupervision?.latestFollowUp && (
+          <p className="text-xs text-rose-500 mt-1 line-clamp-1">
+            最近跟进：{task.activeSupervision.latestFollowUp.content}
           </p>
         )}
       </button>

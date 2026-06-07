@@ -1,4 +1,4 @@
-import { Calendar, Building2, Clock, ChevronRight, BellRing } from 'lucide-react'
+import { Calendar, Building2, Clock, ChevronRight, BellRing, CalendarDays } from 'lucide-react'
 import StatusBadge from './StatusBadge'
 import { cn } from '../lib/utils'
 import type { Task } from '../../shared/types'
@@ -105,6 +105,21 @@ export default function TaskCard({ task, variant = 'default', onClick }: TaskCar
             <span className="text-slate-400">最新进展：</span>
             {task.progress}
           </p>
+        </div>
+      )}
+
+      {task.activeSupervision?.latestFollowUp && (
+        <div className="mt-3 pt-3 border-t border-rose-100">
+          <p className="text-xs text-rose-600 line-clamp-2">
+            <span className="text-rose-400 font-medium">最近跟进：</span>
+            {task.activeSupervision.latestFollowUp.content}
+          </p>
+          {task.activeSupervision.latestFollowUp.nextFollowUpDate && (
+            <p className="text-xs text-rose-500 mt-1 flex items-center gap-1">
+              <CalendarDays className="w-3 h-3" />
+              下次跟进：{task.activeSupervision.latestFollowUp.nextFollowUpDate}
+            </p>
+          )}
         </div>
       )}
     </div>

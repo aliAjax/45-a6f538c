@@ -32,6 +32,16 @@ export interface TaskSupervision {
   closedAt: string | null
   createdAt: string
   updatedAt: string
+  latestFollowUp?: SupervisionFollowUp | null
+  followUpCount?: number
+}
+
+export interface SupervisionFollowUp {
+  id: number
+  supervisionId: number
+  content: string
+  nextFollowUpDate: string | null
+  createdAt: string
 }
 
 export interface CreateSupervisionRequest {
@@ -42,6 +52,11 @@ export interface CreateSupervisionRequest {
 
 export interface CloseSupervisionRequest {
   note?: string
+}
+
+export interface CreateSupervisionFollowUpRequest {
+  content: string
+  nextFollowUpDate?: string
 }
 
 export interface TaskProgress {

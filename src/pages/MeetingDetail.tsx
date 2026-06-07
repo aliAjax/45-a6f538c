@@ -11,6 +11,8 @@ import {
   History,
   ChevronDown,
   ChevronUp,
+  BellRing,
+  CalendarDays,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import StatusBadge from '../components/StatusBadge'
@@ -263,8 +265,14 @@ function TaskItem({
         </div>
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
             <StatusBadge status={task.status} size="sm" />
+            {task.hasActiveSupervision && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-rose-50 text-rose-600 text-[10px] font-medium rounded">
+                <BellRing className="w-3 h-3" />
+                督办中
+              </span>
+            )}
             <span className="text-xs text-slate-400">|</span>
             <span className="text-xs text-slate-500">
               责任科室：{task.department}
@@ -301,7 +309,22 @@ function TaskItem({
             </div>
           )}
 
-          <div className={cn("flex items-center gap-3", task.progress ? "mt-3" : "mt-3 pt-3 border-t border-slate-200")}>
+          {task.activeSupervision?.latestFollowUp && (
+            <div className="mt-3 pt-3 border-t border-rose-100">
+              <p className="text-xs text-rose-600 line-clamp-2">
+                <span className="text-rose-400 font-medium">最近跟进：</span>
+                {task.activeSupervision.latestFollowUp.content}
+              </p>
+              {task.activeSupervision.latestFollowUp.nextFollowUpDate && (
+                <p className="text-xs text-rose-500 mt-1 flex items-center gap-1">
+                  <CalendarDays className="w-3 h-3" />
+                  下次跟进：{task.activeSupervision.latestFollowUp.nextFollowUpDate}
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className={cn("flex items-center gap-3", (task.progress || task.activeSupervision?.latestFollowUp) ? "mt-3" : "mt-3 pt-3 border-t border-slate-200")}>
             <button
               onClick={handleToggleExpand}
               className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-primary-600 transition-colors"

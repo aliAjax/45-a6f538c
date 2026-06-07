@@ -3,6 +3,8 @@ import db from '../db.js'
 import type {
   TaskSupervision,
   CreateSupervisionRequest,
+  SupervisionFollowUp,
+  CreateSupervisionFollowUpRequest,
   Task,
 } from '../../shared/types.js'
 
@@ -15,6 +17,14 @@ interface SupervisionRow {
   closed_at: string | null
   created_at: string
   updated_at: string
+}
+
+interface FollowUpRow {
+  id: number
+  supervision_id: number
+  content: string
+  next_follow_up_date: string | null
+  created_at: string
 }
 
 interface TaskRowWithTitle {
@@ -43,6 +53,16 @@ function rowToSupervision(row: SupervisionRow): TaskSupervision {
   }
 }
 
+function rowToFollowUp(row: FollowUpRow): SupervisionFollowUp {
+  return {
+    id: row.id,
+    supervisionId: row.supervision_id,
+    content: row.content,
+    nextFollowUpDate: row.next_follow_up_date,
+    createdAt: row.created_at,
+  }
+}
+
 function rowToTask(row: TaskRowWithTitle): Task {
   return {
     id: row.id,
@@ -55,6 +75,34 @@ function rowToTask(row: TaskRowWithTitle): Task {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     meetingTitle: row.meeting_title,
+  }
+}
+
+function getLatestFollowUp(supervisionId: number): SupervisionFollowUp | null {
+  const row = db.prepare(`
+    SELECT * FROM supervision_follow_ups
+    WHERE supervision_id = ?
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `).get(supervisionId) as FollowUpRow | undefined
+  return row ? rowToFollowUp(row) : null
+}
+
+function getFollowUpCount(supervisionId: number): number {
+  const row = db.prepare(`
+    SELECT COUNT(*) as count FROM supervision_follow_ups
+    WHERE supervision_id = ?
+  `).get(supervisionId) as { count: number }
+  return row.count
+}
+
+function enrichSupervision(supervision: TaskSupervision): TaskSupervision {
+  const latestFollowUp = getLatestFollowUp(supervision.id)
+  const followUpCount = getFollowUpCount(supervision.id)
+  return {
+    ...supervision,
+    latestFollowUp,
+    followUpCount,
   }
 }
 
@@ -85,7 +133,8 @@ router.get('/active', (_req: Request, res: Response) => {
 
     const supervisionMap = new Map<number, TaskSupervision>()
     supervisionRows.forEach((row) => {
-      supervisionMap.set(row.task_id, rowToSupervision(row))
+      const supervision = enrichSupervision(rowToSupervision(row))
+      supervisionMap.set(row.task_id, supervision)
     })
 
     const tasks = rows.map((row) => {
@@ -118,12 +167,36 @@ router.get('/task/:taskId', (req: Request, res: Response) => {
       ORDER BY created_at DESC, id DESC
     `).all(taskId) as SupervisionRow[]
 
-    const supervisions = rows.map(rowToSupervision)
+    const supervisions = rows.map((row) => enrichSupervision(rowToSupervision(row)))
 
     res.json({ success: true, data: supervisions })
   } catch (error) {
     console.error('Get task supervisions error:', error)
     res.status(500).json({ success: false, error: '获取督办记录失败' })
+  }
+})
+
+router.get('/:id/follow-ups', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+
+    const supervisionRow = db.prepare('SELECT * FROM task_supervisions WHERE id = ?').get(id) as SupervisionRow | undefined
+    if (!supervisionRow) {
+      return res.status(404).json({ success: false, error: '督办记录不存在' })
+    }
+
+    const rows = db.prepare(`
+      SELECT * FROM supervision_follow_ups
+      WHERE supervision_id = ?
+      ORDER BY created_at DESC, id DESC
+    `).all(id) as FollowUpRow[]
+
+    const followUps = rows.map(rowToFollowUp)
+
+    res.json({ success: true, data: followUps })
+  } catch (error) {
+    console.error('Get supervision follow-ups error:', error)
+    res.status(500).json({ success: false, error: '获取跟进记录失败' })
   }
 })
 
@@ -158,21 +231,79 @@ router.post('/', (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '该事项已有督办在进行中' })
     }
 
-    const result = db.prepare(`
-      INSERT INTO task_supervisions (task_id, note, next_follow_up_date)
-      VALUES (?, ?, ?)
-    `).run(taskId, note.trim(), nextFollowUpDate || null)
+    const supervisionId = db.transaction(() => {
+      const result = db.prepare(`
+        INSERT INTO task_supervisions (task_id, note, next_follow_up_date)
+        VALUES (?, ?, ?)
+      `).run(taskId, note.trim(), nextFollowUpDate || null)
+
+      const newSupervisionId = Number(result.lastInsertRowid)
+
+      db.prepare(`
+        INSERT INTO supervision_follow_ups (supervision_id, content, next_follow_up_date, created_at)
+        VALUES (?, ?, ?, datetime('now', 'localtime'))
+      `).run(newSupervisionId, note.trim(), nextFollowUpDate || null)
+
+      return newSupervisionId
+    })()
 
     const newRow = db.prepare(`
       SELECT * FROM task_supervisions WHERE id = ?
-    `).get(result.lastInsertRowid) as SupervisionRow
+    `).get(supervisionId) as SupervisionRow
 
-    const supervision = rowToSupervision(newRow)
+    const supervision = enrichSupervision(rowToSupervision(newRow))
 
     res.json({ success: true, data: supervision })
   } catch (error) {
     console.error('Create supervision error:', error)
     res.status(500).json({ success: false, error: '创建督办失败' })
+  }
+})
+
+router.post('/:id/follow-ups', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const { content, nextFollowUpDate } = req.body as CreateSupervisionFollowUpRequest
+
+    if (!content || !content.trim()) {
+      return res.status(400).json({ success: false, error: '跟进内容不能为空' })
+    }
+
+    const supervisionRow = db.prepare('SELECT * FROM task_supervisions WHERE id = ?').get(id) as SupervisionRow | undefined
+    if (!supervisionRow) {
+      return res.status(404).json({ success: false, error: '督办记录不存在' })
+    }
+
+    if (supervisionRow.status === 'closed') {
+      return res.status(400).json({ success: false, error: '已关闭的督办不能追加跟进' })
+    }
+
+    const followUpId = db.transaction(() => {
+      const result = db.prepare(`
+        INSERT INTO supervision_follow_ups (supervision_id, content, next_follow_up_date)
+        VALUES (?, ?, ?)
+      `).run(Number(id), content.trim(), nextFollowUpDate || null)
+
+      db.prepare(`
+        UPDATE task_supervisions
+        SET next_follow_up_date = ?,
+            updated_at = datetime('now', 'localtime')
+        WHERE id = ?
+      `).run(nextFollowUpDate || null, Number(id))
+
+      return Number(result.lastInsertRowid)
+    })()
+
+    const newRow = db.prepare(`
+      SELECT * FROM supervision_follow_ups WHERE id = ?
+    `).get(followUpId) as FollowUpRow
+
+    const followUp = rowToFollowUp(newRow)
+
+    res.json({ success: true, data: followUp })
+  } catch (error) {
+    console.error('Create supervision follow-up error:', error)
+    res.status(500).json({ success: false, error: '添加跟进记录失败' })
   }
 })
 
@@ -201,7 +332,7 @@ router.patch('/:id/close', (req: Request, res: Response) => {
       SELECT * FROM task_supervisions WHERE id = ?
     `).get(id) as SupervisionRow
 
-    const supervision = rowToSupervision(updatedRow)
+    const supervision = enrichSupervision(rowToSupervision(updatedRow))
 
     res.json({ success: true, data: supervision })
   } catch (error) {
