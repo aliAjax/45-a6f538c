@@ -6,6 +6,7 @@ import {
   Clock,
   ArrowRight,
   Building2,
+  BellRing,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
 import StatCard from '../components/StatCard'
@@ -21,11 +22,13 @@ export default function Dashboard() {
     stats,
     overdueTasks,
     thisWeekTasks,
+    supervisingTasks,
     departmentTaskStats,
     departments,
     fetchStats,
     fetchOverdueTasks,
     fetchThisWeekTasks,
+    fetchSupervisingTasks,
     fetchDepartmentTaskStats,
     fetchDepartments,
   } = useAppStore()
@@ -37,9 +40,10 @@ export default function Dashboard() {
     fetchStats()
     fetchOverdueTasks()
     fetchThisWeekTasks()
+    fetchSupervisingTasks()
     fetchDepartmentTaskStats()
     fetchDepartments()
-  }, [fetchStats, fetchOverdueTasks, fetchThisWeekTasks, fetchDepartmentTaskStats, fetchDepartments])
+  }, [fetchStats, fetchOverdueTasks, fetchThisWeekTasks, fetchSupervisingTasks, fetchDepartmentTaskStats, fetchDepartments])
 
   const handleTaskClick = (task: Task) => {
     setSelectedTask(task)
@@ -50,6 +54,7 @@ export default function Dashboard() {
     fetchStats()
     fetchOverdueTasks()
     fetchThisWeekTasks()
+    fetchSupervisingTasks()
   }
 
   return (
@@ -90,6 +95,51 @@ export default function Dashboard() {
           gradient="bg-gradient-to-br from-amber-500 to-amber-700"
           iconBg="bg-white/20"
         />
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+        <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-rose-50 flex items-center justify-center">
+              <BellRing className="w-5 h-5 text-rose-600" />
+            </div>
+            <div>
+              <h2 className="font-semibold text-slate-800">督办中事项</h2>
+              <p className="text-xs text-slate-500">
+                共 {supervisingTasks.length} 项正在督办
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => navigate('/tasks?status=pending')}
+            className="text-sm text-rose-600 hover:text-rose-700 font-medium flex items-center gap-1 transition-colors"
+          >
+            查看全部
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-4">
+          {supervisingTasks.length === 0 ? (
+            <div className="py-12 text-center">
+              <div className="w-16 h-16 rounded-full bg-green-50 flex items-center justify-center mx-auto mb-3">
+                <CheckSquare className="w-8 h-8 text-green-500" />
+              </div>
+              <p className="text-slate-500 text-sm">暂无督办中事项</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {supervisingTasks.map((task) => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  variant="overdue"
+                  onClick={() => handleTaskClick(task)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

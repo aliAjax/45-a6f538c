@@ -287,6 +287,16 @@ router.patch('/:id', (req: Request, res: Response) => {
         VALUES (?, ?, ?)
       `)
       insertProgress.run(Number(id), newStatus, newProgress)
+
+      if (newStatus === 'completed') {
+        db.prepare(`
+          UPDATE task_supervisions
+          SET status = 'closed',
+              closed_at = datetime('now', 'localtime'),
+              updated_at = datetime('now', 'localtime')
+          WHERE task_id = ? AND status = 'active'
+        `).run(Number(id))
+      }
     })()
 
     const updatedRow = db.prepare(`
@@ -393,6 +403,16 @@ router.patch('/batch/update', (req: Request, res: Response) => {
             VALUES (?, ?, ?)
           `)
           insertProgress.run(Number(update.id), newStatus, newProgress)
+
+          if (newStatus === 'completed') {
+            db.prepare(`
+              UPDATE task_supervisions
+              SET status = 'closed',
+                  closed_at = datetime('now', 'localtime'),
+                  updated_at = datetime('now', 'localtime')
+              WHERE task_id = ? AND status = 'active'
+            `).run(Number(update.id))
+          }
         })
 
         updateTransaction()

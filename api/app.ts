@@ -16,6 +16,7 @@ import statsRoutes from './routes/stats.js'
 import departmentsRoutes from './routes/departments.js'
 import templatesRoutes from './routes/templates.js'
 import remindersRoutes from './routes/reminders.js'
+import supervisionsRoutes from './routes/supervisions.js'
 import './db.js'
 
 dotenv.config()
@@ -36,6 +37,7 @@ app.use('/api/stats', statsRoutes)
 app.use('/api/departments', departmentsRoutes)
 app.use('/api/templates', templatesRoutes)
 app.use('/api/reminders', remindersRoutes)
+app.use('/api/supervisions', supervisionsRoutes)
 
 /**
  * health

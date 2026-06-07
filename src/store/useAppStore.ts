@@ -3,6 +3,8 @@ import type {
   Meeting,
   Task,
   TaskProgress,
+  TaskSupervision,
+  CreateSupervisionRequest,
   Stats,
   CreateMeetingRequest,
   UpdateTaskRequest,
@@ -45,6 +47,7 @@ interface AppState {
   meetingReviewList: MeetingReviewStats[]
   meetingReviewTotal: number
   departmentWorkbench: DepartmentWorkbenchData | null
+  supervisingTasks: Task[]
   loading: boolean
   error: string | null
 
@@ -67,6 +70,10 @@ interface AppState {
   batchUpdateTasks: (updates: BatchUpdateTaskRequest) => Promise<BatchUpdateTaskResponse>
   fetchDepartmentWorkbench: (department: string) => Promise<void>
   fetchTaskProgress: (taskId: number) => Promise<TaskProgress[]>
+  fetchTaskSupervisions: (taskId: number) => Promise<TaskSupervision[]>
+  createSupervision: (data: CreateSupervisionRequest) => Promise<TaskSupervision>
+  closeSupervision: (id: number) => Promise<TaskSupervision>
+  fetchSupervisingTasks: () => Promise<void>
   fetchTemplates: () => Promise<void>
   fetchTemplateDetail: (id: number) => Promise<MeetingTemplate | null>
   createTemplate: (data: CreateTemplateRequest) => Promise<MeetingTemplate>
@@ -94,6 +101,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   meetingReviewList: [],
   meetingReviewTotal: 0,
   departmentWorkbench: null,
+  supervisingTasks: [],
   loading: false,
   error: null,
 
@@ -364,6 +372,54 @@ export const useAppStore = create<AppState>((set, get) => ({
     } catch (error) {
       set({ error: getErrorMessage(error) })
       throw error
+    }
+  },
+
+  fetchTaskSupervisions: async (taskId: number) => {
+    try {
+      const supervisions = await api.get<TaskSupervision[]>(`/supervisions/task/${taskId}`)
+      return supervisions
+    } catch (error) {
+      set({ error: getErrorMessage(error) })
+      throw error
+    }
+  },
+
+  createSupervision: async (data: CreateSupervisionRequest) => {
+    set({ loading: true, error: null })
+    try {
+      const supervision = await api.post<TaskSupervision>('/supervisions', data)
+      set({ loading: false })
+      const { fetchSupervisingTasks } = get()
+      fetchSupervisingTasks()
+      return supervision
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  closeSupervision: async (id: number) => {
+    set({ loading: true, error: null })
+    try {
+      const supervision = await api.patch<TaskSupervision>(`/supervisions/${id}/close`, {})
+      set({ loading: false })
+      const { fetchSupervisingTasks } = get()
+      fetchSupervisingTasks()
+      return supervision
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  fetchSupervisingTasks: async () => {
+    set({ loading: true, error: null })
+    try {
+      const tasks = await api.get<Task[]>('/supervisions/active')
+      set({ supervisingTasks: tasks, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
     }
   },
 

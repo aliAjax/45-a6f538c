@@ -94,6 +94,22 @@ function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_task_progress_task_id ON task_progress(task_id);
     CREATE INDEX IF NOT EXISTS idx_task_progress_created_at ON task_progress(created_at);
+
+    CREATE TABLE IF NOT EXISTS task_supervisions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
+      next_follow_up_date TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      closed_at TEXT,
+      created_at TEXT DEFAULT (datetime('now', 'localtime')),
+      updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_task_supervisions_task_id ON task_supervisions(task_id);
+    CREATE INDEX IF NOT EXISTS idx_task_supervisions_status ON task_supervisions(status);
+    CREATE INDEX IF NOT EXISTS idx_task_supervisions_next_follow_up_date ON task_supervisions(next_follow_up_date);
   `)
 
   const meetingCount = db.prepare('SELECT COUNT(*) as count FROM meetings').get() as { count: number }

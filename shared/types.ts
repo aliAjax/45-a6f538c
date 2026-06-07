@@ -19,6 +19,29 @@ export interface Task {
   createdAt: string
   updatedAt: string
   meetingTitle?: string
+  hasActiveSupervision?: boolean
+  activeSupervision?: TaskSupervision | null
+}
+
+export interface TaskSupervision {
+  id: number
+  taskId: number
+  note: string
+  nextFollowUpDate: string | null
+  status: 'active' | 'closed'
+  closedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CreateSupervisionRequest {
+  taskId: number
+  note: string
+  nextFollowUpDate?: string
+}
+
+export interface CloseSupervisionRequest {
+  note?: string
 }
 
 export interface TaskProgress {
