@@ -107,7 +107,7 @@ export default function Layout({ children }: LayoutProps) {
       </aside>
 
       <div className="flex-1 md:ml-64 flex flex-col min-h-screen">
-        <header className="h-16 bg-white border-b border-slate-200 sticky top-0 z-10 flex items-center justify-between px-4 md:px-6">
+        <header className="h-16 bg-white border-b border-slate-200 sticky top-0 z-30 flex items-center justify-between px-4 md:px-6">
           <div className="flex items-center gap-2">
             <h1 className="text-base font-semibold text-slate-800 md:hidden">
               会议纪要系统

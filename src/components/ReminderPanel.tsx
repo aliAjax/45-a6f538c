@@ -48,6 +48,7 @@ export default function ReminderPanel({ isOpen, onClose }: ReminderPanelProps) {
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      if (isModalOpen) return
       if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
         onClose()
       }
@@ -60,7 +61,7 @@ export default function ReminderPanel({ isOpen, onClose }: ReminderPanelProps) {
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
-  }, [isOpen, onClose])
+  }, [isOpen, isModalOpen, onClose])
 
   if (!isOpen) return null
 
