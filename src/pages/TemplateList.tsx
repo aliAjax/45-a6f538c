@@ -30,6 +30,7 @@ export default function TemplateList() {
   const {
     templates,
     fetchTemplates,
+    fetchTemplateDetail,
     createTemplate,
     updateTemplate,
     deleteTemplate,
@@ -52,6 +53,7 @@ export default function TemplateList() {
   ])
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [loadingEdit, setLoadingEdit] = useState(false)
 
   const [showVersionModal, setShowVersionModal] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<MeetingTemplate | null>(null)
@@ -132,18 +134,26 @@ export default function TemplateList() {
     setShowCreateModal(true)
   }
 
-  const openEditModal = (template: MeetingTemplate) => {
+  const openEditModal = async (template: MeetingTemplate) => {
     setEditingTemplate(template)
     setName(template.name)
     setTitle(template.title)
     setTemplateDepartments(template.departments)
-    if (template.tasks && template.tasks.length > 0) {
-      setTasks(template.tasks.map(t => ({ content: t.content, department: t.department })))
-    } else {
-      setTasks([{ content: '', department: '' }])
-    }
+    setTasks([{ content: '', department: '' }])
+    setLoadingEdit(true)
     setError('')
     setShowCreateModal(true)
+
+    try {
+      const detail = await fetchTemplateDetail(template.id)
+      if (detail && detail.tasks && detail.tasks.length > 0) {
+        setTasks(detail.tasks.map(t => ({ content: t.content, department: t.department })))
+      }
+    } catch {
+      // 保持默认空任务
+    } finally {
+      setLoadingEdit(false)
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -456,11 +466,15 @@ export default function TemplateList() {
                   <div className="flex items-center justify-between mb-3">
                     <label className="text-sm font-medium text-slate-700">
                       议定事项草稿 <span className="text-red-500">*</span>
+                      {loadingEdit && editingTemplate && (
+                        <span className="ml-2 text-xs font-normal text-slate-400">加载中...</span>
+                      )}
                     </label>
                     <button
                       type="button"
                       onClick={addTask}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors"
+                      disabled={loadingEdit}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-primary-600 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Plus className="w-3.5 h-3.5" />
                       添加事项
@@ -468,7 +482,13 @@ export default function TemplateList() {
                   </div>
 
                   <div className="space-y-3">
-                    {tasks.map((task, index) => (
+                    {loadingEdit && editingTemplate ? (
+                      <div className="p-8 text-center">
+                        <div className="w-8 h-8 border-2 border-primary-200 border-t-primary-600 rounded-full animate-spin mx-auto mb-3"></div>
+                        <p className="text-sm text-slate-500">正在加载模板事项...</p>
+                      </div>
+                    ) : (
+                      tasks.map((task, index) => (
                       <div
                         key={index}
                         className="p-3 bg-slate-50 rounded-xl border border-slate-100"
@@ -515,7 +535,8 @@ export default function TemplateList() {
                           </div>
                         </div>
                       </div>
-                    ))}
+                    ))
+                    )}
                   </div>
                 </div>
 
