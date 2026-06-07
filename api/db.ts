@@ -70,6 +70,31 @@ function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_template_tasks_template_id ON template_tasks(template_id);
 
+    CREATE TABLE IF NOT EXISTS template_versions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      template_id INTEGER NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      title TEXT NOT NULL,
+      departments TEXT NOT NULL,
+      task_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now', 'localtime')),
+      FOREIGN KEY (template_id) REFERENCES meeting_templates(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_template_versions_template_id ON template_versions(template_id);
+    CREATE INDEX IF NOT EXISTS idx_template_versions_template_version ON template_versions(template_id, version);
+
+    CREATE TABLE IF NOT EXISTS template_version_tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      version_id INTEGER NOT NULL,
+      content TEXT NOT NULL,
+      department TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (version_id) REFERENCES template_versions(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_template_version_tasks_version_id ON template_version_tasks(version_id);
+
     CREATE TABLE IF NOT EXISTS departments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL UNIQUE,
@@ -285,6 +310,68 @@ function initDatabase() {
 
   migrateTaskProgress()
   migrateSupervisionFollowUps()
+  migrateTemplateVersions()
+}
+
+function migrateTemplateVersions() {
+  const templatesWithoutVersions = db.prepare(`
+    SELECT mt.id, mt.title, mt.departments, mt.created_at
+    FROM meeting_templates mt
+    WHERE NOT EXISTS (
+      SELECT 1 FROM template_versions tv WHERE tv.template_id = mt.id
+    )
+  `).all() as Array<{
+    id: number
+    title: string
+    departments: string
+    created_at: string
+  }>
+
+  if (templatesWithoutVersions.length === 0) {
+    return
+  }
+
+  const insertVersion = db.prepare(`
+    INSERT INTO template_versions (template_id, version, title, departments, task_count, created_at)
+    VALUES (?, 1, ?, ?, ?, ?)
+  `)
+
+  const insertVersionTask = db.prepare(`
+    INSERT INTO template_version_tasks (version_id, content, department, sort_order)
+    VALUES (?, ?, ?, ?)
+  `)
+
+  const getTemplateTasks = db.prepare(`
+    SELECT content, department, sort_order
+    FROM template_tasks
+    WHERE template_id = ?
+    ORDER BY sort_order ASC, id ASC
+  `)
+
+  const transaction = db.transaction((templates: typeof templatesWithoutVersions) => {
+    for (const template of templates) {
+      const tasks = getTemplateTasks.all(template.id) as Array<{
+        content: string
+        department: string
+        sort_order: number
+      }>
+
+      const versionResult = insertVersion.run(
+        template.id,
+        template.title,
+        template.departments,
+        tasks.length,
+        template.created_at
+      )
+      const versionId = versionResult.lastInsertRowid as number
+
+      for (const task of tasks) {
+        insertVersionTask.run(versionId, task.content, task.department, task.sort_order)
+      }
+    }
+  })
+
+  transaction(templatesWithoutVersions)
 }
 
 function migrateTaskProgress() {

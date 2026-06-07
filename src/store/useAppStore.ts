@@ -11,7 +11,9 @@ import type {
   CreateMeetingRequest,
   UpdateTaskRequest,
   MeetingTemplate,
+  TemplateVersion,
   CreateTemplateRequest,
+  UpdateTemplateRequest,
   Department,
   CreateDepartmentRequest,
   UpdateDepartmentRequest,
@@ -51,6 +53,7 @@ interface AppState {
   departmentTaskStats: DepartmentStats[]
   allTaskDepartments: string[]
   templates: MeetingTemplate[]
+  templateVersions: TemplateVersion[]
   calendarData: CalendarMonthData | null
   reminderGroups: ReminderGroups | null
   meetingReviewList: MeetingReviewStats[]
@@ -92,7 +95,11 @@ interface AppState {
   fetchTemplates: () => Promise<void>
   fetchTemplateDetail: (id: number) => Promise<MeetingTemplate | null>
   createTemplate: (data: CreateTemplateRequest) => Promise<MeetingTemplate>
+  updateTemplate: (id: number, data: UpdateTemplateRequest) => Promise<MeetingTemplate>
   deleteTemplate: (id: number) => Promise<void>
+  fetchTemplateVersions: (templateId: number) => Promise<void>
+  fetchTemplateVersionDetail: (templateId: number, versionId: number) => Promise<TemplateVersion | null>
+  restoreTemplateVersion: (templateId: number, versionId: number) => Promise<MeetingTemplate>
   fetchReminders: () => Promise<void>
   fetchMeetingReviewStats: (page?: number, pageSize?: number, startDate?: string, endDate?: string, search?: string) => Promise<void>
   parseMeetingText: (text: string) => Promise<ParseMeetingResponse>
@@ -114,6 +121,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   departmentTaskStats: [],
   allTaskDepartments: [],
   templates: [],
+  templateVersions: [],
   calendarData: null,
   reminderGroups: null,
   meetingReviewList: [],
@@ -536,6 +544,52 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       await api.delete(`/templates/${id}`)
       set({ loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  updateTemplate: async (id: number, data: UpdateTemplateRequest) => {
+    set({ loading: true, error: null })
+    try {
+      const template = await api.put<MeetingTemplate>(`/templates/${id}`, data)
+      set({ loading: false })
+      return template
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      throw error
+    }
+  },
+
+  fetchTemplateVersions: async (templateId: number) => {
+    set({ loading: true, error: null })
+    try {
+      const versions = await api.get<TemplateVersion[]>(`/templates/${templateId}/versions`)
+      set({ templateVersions: versions, loading: false })
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+    }
+  },
+
+  fetchTemplateVersionDetail: async (templateId: number, versionId: number) => {
+    set({ loading: true, error: null })
+    try {
+      const version = await api.get<TemplateVersion>(`/templates/${templateId}/versions/${versionId}`)
+      set({ loading: false })
+      return version
+    } catch (error) {
+      set({ error: getErrorMessage(error), loading: false })
+      return null
+    }
+  },
+
+  restoreTemplateVersion: async (templateId: number, versionId: number) => {
+    set({ loading: true, error: null })
+    try {
+      const template = await api.post<MeetingTemplate>(`/templates/${templateId}/versions/${versionId}/restore`, {})
+      set({ loading: false })
+      return template
     } catch (error) {
       set({ error: getErrorMessage(error), loading: false })
       throw error

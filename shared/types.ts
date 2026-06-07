@@ -107,6 +107,27 @@ export interface MeetingTemplate {
   updatedAt: string
   tasks?: TemplateTask[]
   taskCount?: number
+  currentVersion?: number
+  versionCount?: number
+}
+
+export interface TemplateVersion {
+  id: number
+  templateId: number
+  version: number
+  title: string
+  departments: string
+  taskCount: number
+  createdAt: string
+  tasks?: TemplateTaskVersion[]
+}
+
+export interface TemplateTaskVersion {
+  id: number
+  versionId: number
+  content: string
+  department: string
+  sortOrder: number
 }
 
 export interface TemplateTask {
@@ -127,6 +148,20 @@ export interface CreateTemplateRequest {
     content: string
     department: string
   }>
+}
+
+export interface UpdateTemplateRequest {
+  name?: string
+  title?: string
+  departments?: string
+  tasks: Array<{
+    content: string
+    department: string
+  }>
+}
+
+export interface RestoreTemplateVersionRequest {
+  versionId: number
 }
 
 export interface Department {

@@ -12,9 +12,11 @@ import {
   X,
   Check,
   Link2,
+  ChevronDown,
+  Clock,
 } from 'lucide-react'
 import { useAppStore } from '../store/useAppStore'
-import type { MeetingTemplate } from '../../shared/types'
+import type { MeetingTemplate, TemplateVersion } from '../../shared/types'
 
 interface TaskFormData {
   content: string
@@ -26,7 +28,18 @@ interface TaskFormData {
 export default function MeetingNew() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { createMeeting, departments, fetchDepartments, templates, fetchTemplates, fetchTemplateDetail, loading } = useAppStore()
+  const {
+    createMeeting,
+    departments,
+    fetchDepartments,
+    templates,
+    fetchTemplates,
+    fetchTemplateDetail,
+    templateVersions,
+    fetchTemplateVersions,
+    fetchTemplateVersionDetail,
+    loading,
+  } = useAppStore()
 
   const [title, setTitle] = useState('')
   const [meetingDepartments, setMeetingDepartments] = useState('')
@@ -38,6 +51,9 @@ export default function MeetingNew() {
   const [submitting, setSubmitting] = useState(false)
   const [showTemplateModal, setShowTemplateModal] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<MeetingTemplate | null>(null)
+  const [selectedVersion, setSelectedVersion] = useState<TemplateVersion | null>(null)
+
+  const [expandedTemplateId, setExpandedTemplateId] = useState<number | null>(null)
 
   useEffect(() => {
     fetchDepartments()
@@ -57,6 +73,7 @@ export default function MeetingNew() {
       setTitle(template.title)
       setMeetingDepartments(template.departments)
       setSelectedTemplate(template)
+      setSelectedVersion(null)
       const newTasks = template.tasks.map((t) => ({
         content: t.content,
         department: t.department,
@@ -69,13 +86,51 @@ export default function MeetingNew() {
     }
   }
 
+  const loadTemplateVersion = async (templateId: number, versionId: number) => {
+    const version = await fetchTemplateVersionDetail(templateId, versionId)
+    if (version && version.tasks) {
+      setTitle(version.title)
+      setMeetingDepartments(version.departments)
+      setSelectedVersion(version)
+      const template = templates.find(t => t.id === templateId)
+      if (template) {
+        setSelectedTemplate(template)
+      }
+      const newTasks = version.tasks.map((t) => ({
+        content: t.content,
+        department: t.department,
+        deadline: '',
+        prerequisiteIndexes: [] as number[],
+      }))
+      if (newTasks.length > 0) {
+        setTasks(newTasks)
+      }
+      setShowTemplateModal(false)
+    }
+  }
+
   const handleSelectTemplate = (template: MeetingTemplate) => {
+    if (expandedTemplateId === template.id) {
+      loadTemplate(template.id)
+      setShowTemplateModal(false)
+    } else {
+      setExpandedTemplateId(template.id)
+      fetchTemplateVersions(template.id)
+    }
+  }
+
+  const handleUseLatestVersion = (template: MeetingTemplate) => {
     loadTemplate(template.id)
     setShowTemplateModal(false)
   }
 
+  const handleUseVersion = (template: MeetingTemplate, version: TemplateVersion) => {
+    loadTemplateVersion(template.id, version.id)
+  }
+
   const clearTemplate = () => {
     setSelectedTemplate(null)
+    setSelectedVersion(null)
     setTitle('')
     setMeetingDepartments('')
     setTasks([{ content: '', department: '', deadline: '', prerequisiteIndexes: [] }])
@@ -225,6 +280,7 @@ export default function MeetingNew() {
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <span className="text-xs text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
                       模板：{selectedTemplate.name}
+                      {selectedVersion ? ` v${selectedVersion.version}` : ` v${selectedTemplate.currentVersion || 1} (最新)`}
                     </span>
                     <button
                       type="button"
@@ -465,43 +521,105 @@ export default function MeetingNew() {
               ) : (
                 <div className="space-y-2">
                   {templates.map((template) => {
+                    const isExpanded = expandedTemplateId === template.id
                     const isSelected = selectedTemplate?.id === template.id
                     return (
-                      <div
-                        key={template.id}
-                        onClick={() => handleSelectTemplate(template)}
-                        className={`p-4 rounded-xl border cursor-pointer transition-all ${
-                          isSelected
-                            ? 'border-primary-500 bg-primary-50'
-                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
-                              isSelected ? 'bg-primary-100' : 'bg-indigo-50'
-                            }`}>
-                              <LayoutTemplate className={`w-4.5 h-4.5 ${
-                                isSelected ? 'text-primary-600' : 'text-indigo-600'
+                      <div key={template.id} className="space-y-1">
+                        <div
+                          onClick={() => handleSelectTemplate(template)}
+                          className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                            isSelected
+                              ? 'border-primary-500 bg-primary-50'
+                              : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${
+                                isSelected ? 'bg-primary-100' : 'bg-indigo-50'
+                              }`}>
+                                <LayoutTemplate className={`w-4.5 h-4.5 ${
+                                  isSelected ? 'text-primary-600' : 'text-indigo-600'
+                                }`} />
+                              </div>
+                              <div>
+                                <h3 className={`font-medium text-sm ${
+                                  isSelected ? 'text-primary-700' : 'text-slate-800'
+                                }`}>
+                                  {template.name}
+                                </h3>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <span className="text-xs text-slate-500">
+                                    {template.taskCount ?? template.tasks?.length ?? 0} 条议定事项
+                                  </span>
+                                  <span className="text-xs text-indigo-500 font-medium">
+                                    v{template.currentVersion || 1}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              {isSelected && (
+                                <div className="w-5 h-5 rounded-full bg-primary-600 flex items-center justify-center">
+                                  <Check className="w-3 h-3 text-white" />
+                                </div>
+                              )}
+                              <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${
+                                isExpanded ? 'rotate-180' : ''
                               }`} />
                             </div>
-                            <div>
-                              <h3 className={`font-medium text-sm ${
-                                isSelected ? 'text-primary-700' : 'text-slate-800'
-                              }`}>
-                                {template.name}
-                              </h3>
-                              <p className="text-xs text-slate-500 mt-0.5">
-                                {template.taskCount ?? template.tasks?.length ?? 0} 条议定事项
-                              </p>
-                            </div>
                           </div>
-                          {isSelected && (
-                            <div className="w-5 h-5 rounded-full bg-primary-600 flex items-center justify-center">
-                              <Check className="w-3 h-3 text-white" />
-                            </div>
-                          )}
                         </div>
+
+                        {isExpanded && (
+                          <div className="ml-4 pl-4 border-l-2 border-slate-100 space-y-1 py-1">
+                            {templateVersions.length > 0 && templateVersions[0]?.templateId === template.id ? (
+                              <>
+                                {templateVersions.map((version) => {
+                                  const isLatest = version.version === template.currentVersion
+                                  return (
+                                    <div
+                                      key={version.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleUseVersion(template, version)
+                                      }}
+                                      className="p-3 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors flex items-center justify-between group"
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <Clock className="w-3.5 h-3.5 text-slate-400" />
+                                        <span className="text-sm font-medium text-slate-700">
+                                          版本 v{version.version}
+                                        </span>
+                                        {isLatest && (
+                                          <span className="text-[10px] font-medium text-green-600 bg-green-50 px-1.5 py-0.5 rounded">
+                                            最新
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-xs text-slate-400">
+                                        {version.taskCount} 条 · {version.createdAt}
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </>
+                            ) : (
+                              <div className="p-3 text-center">
+                                <p className="text-xs text-slate-400">加载版本中...</p>
+                              </div>
+                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleUseLatestVersion(template)
+                              }}
+                              className="w-full p-2 text-center text-xs text-primary-600 bg-primary-50 rounded-lg hover:bg-primary-100 transition-colors font-medium"
+                            >
+                              使用最新版本
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )
                   })}
