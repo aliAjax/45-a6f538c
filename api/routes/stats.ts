@@ -1,19 +1,14 @@
 import { Router, type Request, type Response } from 'express'
 import db from '../db.js'
-import { getReminderRuleForDepartment } from './reminder-rules.js'
+import {
+  getReminderBucket,
+  getReminderRule,
+  getTaskEffectiveReminderDateFromRow,
+  type ReminderTaskRow,
+} from '../lib/task-utils.js'
 import type { Stats } from '../../shared/types.js'
 
 const router = Router()
-
-interface TaskRow {
-  id: number
-  department: string
-  deadline: string
-  status: string
-  has_active_supervision?: number
-  next_follow_up_date?: string | null
-  follow_up_next_date?: string | null
-}
 
 router.get('/', (_req: Request, res: Response) => {
   try {
@@ -39,7 +34,7 @@ router.get('/', (_req: Request, res: Response) => {
          ORDER BY f.created_at DESC, f.id DESC LIMIT 1) as follow_up_next_date
       FROM tasks t
       WHERE t.status != 'completed'
-    `).all() as TaskRow[]
+    `).all() as ReminderTaskRow[]
 
     let overdueCount = 0
     let upcomingCount = 0
@@ -49,44 +44,15 @@ router.get('/', (_req: Request, res: Response) => {
     taskRows.forEach((row) => {
       if (seenTaskIds.has(row.id)) return
 
-      const rule = getReminderRuleForDepartment(row.department)
+      const rule = getReminderRule(row.department)
+      const bucket = getReminderBucket(getTaskEffectiveReminderDateFromRow(row, rule), rule, today)
 
-      const deadlineStr = row.deadline.split('T')[0].split(' ')[0]
-
-      let effectiveDateStr = deadlineStr
-
-      if (rule.includeSupervisionFollowUp && row.has_active_supervision) {
-        const supervisionNextDate = row.next_follow_up_date
-          ? row.next_follow_up_date.split('T')[0].split(' ')[0]
-          : null
-
-        const followUpNextDate = row.follow_up_next_date
-          ? row.follow_up_next_date.split('T')[0].split(' ')[0]
-          : null
-
-        const effectiveSupervisionDate = followUpNextDate || supervisionNextDate
-
-        if (effectiveSupervisionDate && effectiveSupervisionDate < deadlineStr) {
-          effectiveDateStr = effectiveSupervisionDate
-        }
-      }
-
-      const effectiveDate = new Date(effectiveDateStr)
-      effectiveDate.setHours(0, 0, 0, 0)
-
-      if (effectiveDate < today) {
-        if (rule.repeatOverdue) {
-          overdueCount++
-          seenTaskIds.add(row.id)
-        }
-      } else {
-        const diffTime = effectiveDate.getTime() - today.getTime()
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-
-        if (diffDays <= rule.advanceDays) {
-          upcomingCount++
-          seenTaskIds.add(row.id)
-        }
+      if (bucket === 'overdue') {
+        overdueCount++
+        seenTaskIds.add(row.id)
+      } else if (bucket === 'today' || bucket === 'upcoming') {
+        upcomingCount++
+        seenTaskIds.add(row.id)
       }
     })
 

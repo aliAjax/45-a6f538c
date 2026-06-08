@@ -1,11 +1,16 @@
 import { Router, type Request, type Response } from 'express'
 import db, { createAuditLog } from '../db.js'
-import { getReminderRuleForDepartment } from './reminder-rules.js'
+import {
+  enrichTasksWithDependencies,
+  getReminderRule,
+  isTaskInReminder,
+  mapRowsToTasks,
+  rowToTask,
+  type TaskRow as TaskRowWithTitle,
+} from '../lib/task-utils.js'
 import type {
   Task,
   TaskProgress,
-  TaskSupervision,
-  SupervisionFollowUp,
   UpdateTaskRequest,
   CalendarDayTasks,
   BatchUpdateTaskRequest,
@@ -17,44 +22,11 @@ import type {
   DepartmentRiskStats,
 } from '../../shared/types.js'
 
-interface TaskRowWithTitle {
-  id: number
-  meeting_id: number
-  content: string
-  department: string
-  deadline: string
-  status: string
-  progress: string | null
-  created_at: string
-  updated_at: string
-  meeting_title?: string
-  has_active_supervision?: number
-}
-
 interface TaskProgressRow {
   id: number
   task_id: number
   status: string
   progress: string | null
-  created_at: string
-}
-
-interface SupervisionRow {
-  id: number
-  task_id: number
-  note: string
-  next_follow_up_date: string | null
-  status: string
-  closed_at: string | null
-  created_at: string
-  updated_at: string
-}
-
-interface FollowUpRow {
-  id: number
-  supervision_id: number
-  content: string
-  next_follow_up_date: string | null
   created_at: string
 }
 
@@ -68,190 +40,7 @@ function rowToTaskProgress(row: TaskProgressRow): TaskProgress {
   }
 }
 
-function rowToFollowUp(row: FollowUpRow): SupervisionFollowUp {
-  return {
-    id: row.id,
-    supervisionId: row.supervision_id,
-    content: row.content,
-    nextFollowUpDate: row.next_follow_up_date,
-    createdAt: row.created_at,
-  }
-}
-
-function getActiveSupervisionWithLatestFollowUp(taskId: number): TaskSupervision | null {
-  const supervisionRow = db.prepare(`
-    SELECT * FROM task_supervisions
-    WHERE task_id = ? AND status = 'active'
-    ORDER BY created_at DESC, id DESC
-    LIMIT 1
-  `).get(taskId) as SupervisionRow | undefined
-
-  if (!supervisionRow) return null
-
-  const followUpRow = db.prepare(`
-    SELECT * FROM supervision_follow_ups
-    WHERE supervision_id = ?
-    ORDER BY created_at DESC, id DESC
-    LIMIT 1
-  `).get(supervisionRow.id) as FollowUpRow | undefined
-
-  const followUpCountRow = db.prepare(`
-    SELECT COUNT(*) as count FROM supervision_follow_ups
-    WHERE supervision_id = ?
-  `).get(supervisionRow.id) as { count: number }
-
-  return {
-    id: supervisionRow.id,
-    taskId: supervisionRow.task_id,
-    note: supervisionRow.note,
-    nextFollowUpDate: supervisionRow.next_follow_up_date,
-    status: supervisionRow.status as 'active' | 'closed',
-    closedAt: supervisionRow.closed_at,
-    createdAt: supervisionRow.created_at,
-    updatedAt: supervisionRow.updated_at,
-    latestFollowUp: followUpRow ? rowToFollowUp(followUpRow) : null,
-    followUpCount: followUpCountRow.count,
-  }
-}
-
 const router = Router()
-
-function rowToTask(row: TaskRowWithTitle): Task {
-  const task: Task = {
-    id: row.id,
-    meetingId: row.meeting_id,
-    content: row.content,
-    department: row.department,
-    deadline: row.deadline,
-    status: row.status as Task['status'],
-    progress: row.progress || '',
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    meetingTitle: row.meeting_title,
-    hasActiveSupervision: !!row.has_active_supervision,
-  }
-
-  if (task.hasActiveSupervision) {
-    task.activeSupervision = getActiveSupervisionWithLatestFollowUp(row.id)
-  }
-
-  return task
-}
-
-function enrichTasksWithDependencies(tasks: Task[]) {
-  if (tasks.length === 0) return
-
-  const taskMap = new Map<number, Task>()
-  tasks.forEach(task => taskMap.set(task.id, task))
-
-  const allRelatedIds = new Set<number>()
-  tasks.forEach(task => allRelatedIds.add(task.id))
-
-  const dependencyRows = db.prepare(`
-    SELECT td.task_id, td.prerequisite_task_id,
-           t.status as prereq_status,
-           t.content as prereq_content,
-           t.meeting_id as prereq_meeting_id
-    FROM task_dependencies td
-    LEFT JOIN tasks t ON td.prerequisite_task_id = t.id
-    WHERE td.task_id IN (${tasks.map(() => '?').join(',')})
-       OR td.prerequisite_task_id IN (${tasks.map(() => '?').join(',')})
-  `).all(...[...tasks.map(t => t.id), ...tasks.map(t => t.id)]) as Array<{
-    task_id: number
-    prerequisite_task_id: number
-    prereq_status: string
-    prereq_content: string
-    prereq_meeting_id: number
-  }>
-
-  tasks.forEach(task => {
-    const prereqIds: number[] = []
-    const blockingIds: number[] = []
-    const prereqInfoMap = new Map<number, { status: string; content: string; meetingId: number }>()
-
-    dependencyRows.forEach(row => {
-      if (row.task_id === task.id) {
-        prereqIds.push(row.prerequisite_task_id)
-        prereqInfoMap.set(row.prerequisite_task_id, {
-          status: row.prereq_status,
-          content: row.prereq_content,
-          meetingId: row.prereq_meeting_id,
-        })
-      }
-      if (row.prerequisite_task_id === task.id) {
-        blockingIds.push(row.task_id)
-      }
-    })
-
-    task.prerequisiteTaskIds = prereqIds
-    task.blockingTaskIds = blockingIds
-
-    const uncompletedPrereqs = prereqIds.filter(id => {
-      const prereqInfo = prereqInfoMap.get(id)
-      return prereqInfo && prereqInfo.status !== 'completed'
-    })
-    task.isBlocked = uncompletedPrereqs.length > 0
-
-    task.prerequisiteTasks = prereqIds
-      .map(id => {
-        const info = prereqInfoMap.get(id)
-        if (info) {
-          return {
-            id,
-            meetingId: info.meetingId,
-            content: info.content,
-            department: '',
-            deadline: '',
-            status: info.status as Task['status'],
-            progress: '',
-            createdAt: '',
-            updatedAt: '',
-            isBlocked: false,
-            prerequisiteTaskIds: [],
-            blockingTaskIds: [],
-          } as Task
-        }
-        return null
-      })
-      .filter((t) => t !== null) as Task[]
-
-    const blockingInfoMap = new Map<number, { status: string; content: string; meetingId: number }>()
-    dependencyRows.forEach(row => {
-      if (row.prerequisite_task_id === task.id) {
-        const blockingTaskInfo = tasks.find(t => t.id === row.task_id)
-        if (blockingTaskInfo) {
-          blockingInfoMap.set(row.task_id, {
-            status: blockingTaskInfo.status,
-            content: blockingTaskInfo.content,
-            meetingId: blockingTaskInfo.meetingId || 0,
-          })
-        }
-      }
-    })
-    task.blockingTasks = blockingIds
-      .map(id => {
-        const info = blockingInfoMap.get(id)
-        if (info) {
-          return {
-            id,
-            meetingId: info.meetingId,
-            content: info.content,
-            department: '',
-            deadline: '',
-            status: info.status as Task['status'],
-            progress: '',
-            createdAt: '',
-            updatedAt: '',
-            isBlocked: false,
-            prerequisiteTaskIds: [],
-            blockingTaskIds: [],
-          } as Task
-        }
-        return null
-      })
-      .filter((t) => t !== null) as Task[]
-  })
-}
 
 function getThisWeekRange(): { start: string; end: string } {
   const now = new Date()
@@ -365,7 +154,7 @@ router.get('/', (req: Request, res: Response) => {
       LIMIT ? OFFSET ?
     `).all(...params, Number(pageSize), offset) as TaskRowWithTitle[]
 
-    const tasks = rows.map(rowToTask)
+    const tasks = mapRowsToTasks(rows)
     enrichTasksWithDependencies(tasks)
 
     res.json({
@@ -399,7 +188,7 @@ router.get('/overdue', (_req: Request, res: Response) => {
       ORDER BY t.deadline ASC, t.id DESC
     `).all(today) as TaskRowWithTitle[]
 
-    const tasks = rows.map(rowToTask)
+    const tasks = mapRowsToTasks(rows)
     enrichTasksWithDependencies(tasks)
 
     res.json({ success: true, data: tasks })
@@ -429,7 +218,7 @@ router.get('/this-week', (_req: Request, res: Response) => {
       ORDER BY t.deadline ASC, t.id DESC
     `).all(start, end, today) as TaskRowWithTitle[]
 
-    const tasks = rows.map(rowToTask)
+    const tasks = mapRowsToTasks(rows)
     enrichTasksWithDependencies(tasks)
 
     res.json({ success: true, data: tasks })
@@ -524,42 +313,12 @@ router.get('/calendar', (req: Request, res: Response) => {
       ORDER BY t.deadline ASC, t.id DESC
     `).all(...params) as TaskRowWithTitle[]
 
-    let tasks = rows.map(rowToTask)
+    let tasks = mapRowsToTasks(rows)
 
     if (dueSoonOnly === 'true') {
       tasks = tasks.filter((task) => {
-        const rule = getReminderRuleForDepartment(task.department)
-
-        const deadlineStr = task.deadline.split('T')[0].split(' ')[0]
-        let effectiveDateStr = deadlineStr
-
-        if (rule.includeSupervisionFollowUp && task.activeSupervision) {
-          const supervisionNextDate = task.activeSupervision.nextFollowUpDate
-            ? task.activeSupervision.nextFollowUpDate.split('T')[0].split(' ')[0]
-            : null
-
-          const followUpNextDate = task.activeSupervision.latestFollowUp?.nextFollowUpDate
-            ? task.activeSupervision.latestFollowUp.nextFollowUpDate.split('T')[0].split(' ')[0]
-            : null
-
-          const effectiveSupervisionDate = followUpNextDate || supervisionNextDate
-
-          if (effectiveSupervisionDate && effectiveSupervisionDate < deadlineStr) {
-            effectiveDateStr = effectiveSupervisionDate
-          }
-        }
-
-        const effectiveDate = new Date(effectiveDateStr)
-        effectiveDate.setHours(0, 0, 0, 0)
-
-        if (effectiveDate < today) {
-          return rule.repeatOverdue
-        }
-
-        const diffTime = effectiveDate.getTime() - today.getTime()
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-
-        return diffDays <= rule.advanceDays
+        const rule = getReminderRule(task.department)
+        return isTaskInReminder(task, rule, today) !== null
       })
     }
 
@@ -1166,10 +925,10 @@ router.get('/workbench/:department', (req: Request, res: Response) => {
       LIMIT 50
     `).all(department) as TaskRowWithTitle[]
 
-    const pending = pendingRows.map(rowToTask)
-    const overdue = overdueRows.map(rowToTask)
-    const dueThisWeek = dueThisWeekRows.map(rowToTask)
-    const completed = completedRows.map(rowToTask)
+    const pending = mapRowsToTasks(pendingRows)
+    const overdue = mapRowsToTasks(overdueRows)
+    const dueThisWeek = mapRowsToTasks(dueThisWeekRows)
+    const completed = mapRowsToTasks(completedRows)
 
     const allTasks = [...pending, ...overdue, ...dueThisWeek, ...completed]
     enrichTasksWithDependencies(allTasks)
@@ -1332,10 +1091,10 @@ router.get('/risk/:department', (req: Request, res: Response) => {
       ORDER BY t.updated_at ASC, t.id DESC
     `).all(department, longNoUpdateDate) as TaskRowWithTitle[]
 
-    const overdueTasks = overdueRows.map(rowToTask)
-    const dueSoonTasks = dueSoonRows.map(rowToTask)
-    const supervisingTasks = supervisingRows.map(rowToTask)
-    const longNoUpdateTasks = longNoUpdateRows.map(rowToTask)
+    const overdueTasks = mapRowsToTasks(overdueRows)
+    const dueSoonTasks = mapRowsToTasks(dueSoonRows)
+    const supervisingTasks = mapRowsToTasks(supervisingRows)
+    const longNoUpdateTasks = mapRowsToTasks(longNoUpdateRows)
 
     const allRiskTasks = [...overdueTasks, ...dueSoonTasks, ...supervisingTasks, ...longNoUpdateTasks]
     enrichTasksWithDependencies(allRiskTasks)

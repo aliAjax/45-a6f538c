@@ -1,10 +1,13 @@
 import { Router, type Request, type Response } from 'express'
 import db, { createAuditLog } from '../db.js'
+import {
+  enrichTasksWithDependencies,
+  mapRowsToTasks,
+  type TaskRow,
+} from '../lib/task-utils.js'
 import type {
   Meeting,
   Task,
-  TaskSupervision,
-  SupervisionFollowUp,
   CreateMeetingRequest,
   MeetingReviewStats,
   MeetingReviewDetail,
@@ -34,84 +37,6 @@ interface MeetingRow {
   updated_at: string
 }
 
-interface TaskRow {
-  id: number
-  meeting_id: number
-  content: string
-  department: string
-  deadline: string
-  status: string
-  progress: string | null
-  created_at: string
-  updated_at: string
-  has_active_supervision?: number
-}
-
-interface SupervisionRow {
-  id: number
-  task_id: number
-  note: string
-  next_follow_up_date: string | null
-  status: string
-  closed_at: string | null
-  created_at: string
-  updated_at: string
-}
-
-interface FollowUpRow {
-  id: number
-  supervision_id: number
-  content: string
-  next_follow_up_date: string | null
-  created_at: string
-}
-
-function rowToFollowUp(row: FollowUpRow): SupervisionFollowUp {
-  return {
-    id: row.id,
-    supervisionId: row.supervision_id,
-    content: row.content,
-    nextFollowUpDate: row.next_follow_up_date,
-    createdAt: row.created_at,
-  }
-}
-
-function getActiveSupervisionWithLatestFollowUp(taskId: number): TaskSupervision | null {
-  const supervisionRow = db.prepare(`
-    SELECT * FROM task_supervisions
-    WHERE task_id = ? AND status = 'active'
-    ORDER BY created_at DESC, id DESC
-    LIMIT 1
-  `).get(taskId) as SupervisionRow | undefined
-
-  if (!supervisionRow) return null
-
-  const followUpRow = db.prepare(`
-    SELECT * FROM supervision_follow_ups
-    WHERE supervision_id = ?
-    ORDER BY created_at DESC, id DESC
-    LIMIT 1
-  `).get(supervisionRow.id) as FollowUpRow | undefined
-
-  const followUpCountRow = db.prepare(`
-    SELECT COUNT(*) as count FROM supervision_follow_ups
-    WHERE supervision_id = ?
-  `).get(supervisionRow.id) as { count: number }
-
-  return {
-    id: supervisionRow.id,
-    taskId: supervisionRow.task_id,
-    note: supervisionRow.note,
-    nextFollowUpDate: supervisionRow.next_follow_up_date,
-    status: supervisionRow.status as 'active' | 'closed',
-    closedAt: supervisionRow.closed_at,
-    createdAt: supervisionRow.created_at,
-    updatedAt: supervisionRow.updated_at,
-    latestFollowUp: followUpRow ? rowToFollowUp(followUpRow) : null,
-    followUpCount: followUpCountRow.count,
-  }
-}
-
 const router = Router()
 
 function rowToMeeting(row: MeetingRow): Meeting {
@@ -123,106 +48,6 @@ function rowToMeeting(row: MeetingRow): Meeting {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
-}
-
-function rowToTask(row: TaskRow): Task {
-  const task: Task = {
-    id: row.id,
-    meetingId: row.meeting_id,
-    content: row.content,
-    department: row.department,
-    deadline: row.deadline,
-    status: row.status as Task['status'],
-    progress: row.progress || '',
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    hasActiveSupervision: !!row.has_active_supervision,
-  }
-
-  if (task.hasActiveSupervision) {
-    task.activeSupervision = getActiveSupervisionWithLatestFollowUp(row.id)
-  }
-
-  return task
-}
-
-function enrichTasksWithDependencies(tasks: Task[]) {
-  const taskMap = new Map<number, Task>()
-  tasks.forEach(task => taskMap.set(task.id, task))
-
-  const dependencyRows = db.prepare(`
-    SELECT td.task_id, td.prerequisite_task_id,
-           t.status as prereq_status,
-           t.content as prereq_content,
-           t.meeting_id as prereq_meeting_id
-    FROM task_dependencies td
-    LEFT JOIN tasks t ON td.prerequisite_task_id = t.id
-    WHERE td.task_id IN (${tasks.map(() => '?').join(',')})
-       OR td.prerequisite_task_id IN (${tasks.map(() => '?').join(',')})
-  `).all(...[...tasks.map(t => t.id), ...tasks.map(t => t.id)]) as Array<{
-    task_id: number
-    prerequisite_task_id: number
-    prereq_status: string
-    prereq_content: string
-    prereq_meeting_id: number
-  }>
-
-  tasks.forEach(task => {
-    const prereqIds: number[] = []
-    const blockingIds: number[] = []
-    const prereqInfoMap = new Map<number, { status: string; content: string; meetingId: number }>()
-
-    dependencyRows.forEach(row => {
-      if (row.task_id === task.id) {
-        prereqIds.push(row.prerequisite_task_id)
-        prereqInfoMap.set(row.prerequisite_task_id, {
-          status: row.prereq_status,
-          content: row.prereq_content,
-          meetingId: row.prereq_meeting_id,
-        })
-      }
-      if (row.prerequisite_task_id === task.id) {
-        blockingIds.push(row.task_id)
-      }
-    })
-
-    task.prerequisiteTaskIds = prereqIds
-    task.blockingTaskIds = blockingIds
-
-    const uncompletedPrereqs = prereqIds.filter(id => {
-      const prereqInfo = prereqInfoMap.get(id)
-      return prereqInfo && prereqInfo.status !== 'completed'
-    })
-    task.isBlocked = uncompletedPrereqs.length > 0
-
-    task.prerequisiteTasks = prereqIds
-      .map(id => {
-        const existing = taskMap.get(id)
-        if (existing) return existing
-        const info = prereqInfoMap.get(id)
-        if (info) {
-          return {
-            id,
-            meetingId: info.meetingId,
-            content: info.content,
-            department: '',
-            deadline: '',
-            status: info.status as Task['status'],
-            progress: '',
-            createdAt: '',
-            updatedAt: '',
-            isBlocked: false,
-            prerequisiteTaskIds: [],
-            blockingTaskIds: [],
-          }
-        }
-        return null
-      })
-      .filter((t): t is Task => t !== null)
-    task.blockingTasks = blockingIds
-      .map(id => taskMap.get(id))
-      .filter((t): t is Task => t !== undefined)
-  })
 }
 
 router.get('/', (req: Request, res: Response) => {
@@ -283,7 +108,7 @@ router.get('/:id', (req: Request, res: Response) => {
     `).all(id) as TaskRow[]
 
     const meeting = rowToMeeting(meetingRow)
-    meeting.tasks = taskRows.map(rowToTask)
+    meeting.tasks = mapRowsToTasks(taskRows)
     enrichTasksWithDependencies(meeting.tasks)
 
     res.json({ success: true, data: meeting })
@@ -385,7 +210,7 @@ router.post('/', (req: Request, res: Response) => {
     `).all(result) as TaskRow[]
 
     const meeting = rowToMeeting(meetingRow)
-    meeting.tasks = taskRows.map(rowToTask)
+    meeting.tasks = mapRowsToTasks(taskRows)
     enrichTasksWithDependencies(meeting.tasks)
 
     res.status(201).json({ success: true, data: meeting })
@@ -933,7 +758,7 @@ router.get('/review/detail/:id', (req: Request, res: Response) => {
       ORDER BY t.id ASC
     `).all(id) as TaskRow[]
 
-    const tasks = taskRows.map(rowToTask)
+    const tasks = mapRowsToTasks(taskRows)
     const uncompletedTasks = tasks.filter((t) => t.status !== 'completed')
 
     const progressRows = db.prepare(`
@@ -1395,7 +1220,7 @@ router.post('/:id/append-tasks', (req: Request, res: Response) => {
       ORDER BY t.id ASC
     `).all(...appendedTaskIds) as TaskRow[]
 
-    const newTasks = newTaskRows.map(rowToTask)
+    const newTasks = mapRowsToTasks(newTaskRows)
     enrichTasksWithDependencies(newTasks)
 
     res.json({ success: true, data: { meetingId: Number(id), tasks: newTasks } })
