@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, afterAll } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -8,20 +8,14 @@ import {
   setActiveDatabase,
   restoreDefaultDatabase,
   getDefaultDbPath,
-  ensureDataDir,
 } from '../api/db.js'
 
 describe('数据库隔离性验证', () => {
   const testDbPath1 = path.join(os.tmpdir(), `isolation-test-1-${Date.now()}.db`)
   const testDbPath2 = path.join(os.tmpdir(), `isolation-test-2-${Date.now()}.db`)
 
-  beforeAll(() => {
-    ensureDataDir()
-  })
-
-  afterAll(() => {
-    restoreDefaultDatabase()
-    ;[testDbPath1, testDbPath2].forEach((p) => {
+  function removeSqliteFiles(dbPath: string): void {
+    for (const p of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
       if (fs.existsSync(p)) {
         try {
           fs.unlinkSync(p)
@@ -29,16 +23,24 @@ describe('数据库隔离性验证', () => {
           // ignore
         }
       }
-    })
+    }
+  }
+
+  afterAll(() => {
+    restoreDefaultDatabase()
+    ;[testDbPath1, testDbPath2].forEach(removeSqliteFiles)
   })
 
   it('真实数据库在测试过程中数据量不变', () => {
     const defaultPath = getDefaultDbPath()
-    expect(fs.existsSync(defaultPath)).toBe(true)
+    const defaultDbExistsBefore = fs.existsSync(defaultPath)
+    let beforeCount: number | null = null
 
-    const dbBefore = new Database(defaultPath)
-    const beforeCount = (dbBefore.prepare('SELECT COUNT(*) as count FROM tasks').get() as { count: number }).count
-    dbBefore.close()
+    if (defaultDbExistsBefore) {
+      const dbBefore = new Database(defaultPath)
+      beforeCount = (dbBefore.prepare('SELECT COUNT(*) as count FROM tasks').get() as { count: number }).count
+      dbBefore.close()
+    }
 
     const testInstance = createDatabaseInstance(testDbPath1, { seed: false })
     setActiveDatabase(testInstance)
@@ -54,10 +56,14 @@ describe('数据库隔离性验证', () => {
     restoreDefaultDatabase()
     testInstance.db.close()
 
+    if (!defaultDbExistsBefore) {
+      expect(fs.existsSync(defaultPath)).toBe(false)
+      return
+    }
+
     const dbAfter = new Database(defaultPath)
     const afterCount = (dbAfter.prepare('SELECT COUNT(*) as count FROM tasks').get() as { count: number }).count
     dbAfter.close()
-
     expect(afterCount).toBe(beforeCount)
   })
 
@@ -109,15 +115,7 @@ describe('数据库隔离性验证', () => {
       instanceA.db.close()
       instanceB.db.close()
     } finally {
-      ;[dbPathA, dbPathB].forEach((p) => {
-        if (fs.existsSync(p)) {
-          try {
-            fs.unlinkSync(p)
-          } catch {
-            // ignore
-          }
-        }
-      })
+      ;[dbPathA, dbPathB].forEach(removeSqliteFiles)
     }
   })
 })
