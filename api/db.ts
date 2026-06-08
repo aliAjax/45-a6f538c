@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import fs from 'fs'
+import { assertRuntimeConfig, getConfig } from './config.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -684,11 +685,13 @@ export function createDatabaseInstance(dbPath: string, options: { seed?: boolean
 }
 
 export function getDefaultDbPath(): string {
-  return path.join(__dirname, '..', 'data', 'meeting.db')
+  const config = getConfig()
+  assertRuntimeConfig(config)
+  return config.databasePath
 }
 
 export function ensureDataDir(): void {
-  const dataDir = path.join(__dirname, '..', 'data')
+  const dataDir = path.dirname(getDefaultDbPath())
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true })
   }
@@ -698,8 +701,10 @@ let _defaultInstance: DatabaseInstance | null = null
 
 export function getDefaultInstance(): DatabaseInstance {
   if (!_defaultInstance) {
+    const config = getConfig()
+    assertRuntimeConfig(config)
     ensureDataDir()
-    _defaultInstance = createDatabaseInstance(getDefaultDbPath(), { seed: true })
+    _defaultInstance = createDatabaseInstance(config.databasePath, { seed: config.seedData })
   }
   return _defaultInstance
 }

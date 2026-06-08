@@ -2,14 +2,17 @@
  * local server entry file, for local development
  */
 import app from './app.js';
+import { assertRuntimeConfig, getConfig, printConfigSummary } from './config.js';
 
 /**
  * start server with port
  */
-const PORT = process.env.PORT || 3001;
+const config = getConfig();
+assertRuntimeConfig(config);
 
-const server = app.listen(PORT, () => {
-  console.log(`Server ready on port ${PORT}`);
+const server = app.listen(config.apiPort, () => {
+  printConfigSummary(config);
+  console.log(`Server ready on port ${config.apiPort}`);
 });
 
 /**

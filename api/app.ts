@@ -8,7 +8,6 @@ import express, {
   type ErrorRequestHandler,
 } from 'express'
 import cors from 'cors'
-import dotenv from 'dotenv'
 import authRoutes from './routes/auth.js'
 import meetingsRoutes from './routes/meetings.js'
 import tasksRoutes from './routes/tasks.js'
@@ -21,8 +20,6 @@ import supervisionsRoutes from './routes/supervisions.js'
 import viewsRoutes from './routes/views.js'
 import auditLogsRoutes from './routes/audit-logs.js'
 import './db.js'
-
-dotenv.config()
 
 const app: express.Application = express()
 
