@@ -683,14 +683,73 @@ export function createDatabaseInstance(dbPath: string, options: { seed?: boolean
   }
 }
 
-const defaultDbPath = path.join(__dirname, '..', 'data', 'meeting.db')
-
-const dataDir = path.join(__dirname, '..', 'data')
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true })
+export function getDefaultDbPath(): string {
+  return path.join(__dirname, '..', 'data', 'meeting.db')
 }
 
-const { db: defaultDb, createAuditLog: defaultCreateAuditLog } = createDatabaseInstance(defaultDbPath, { seed: true })
+export function ensureDataDir(): void {
+  const dataDir = path.join(__dirname, '..', 'data')
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true })
+  }
+}
 
-export default defaultDb
-export { defaultCreateAuditLog as createAuditLog }
+let _defaultInstance: DatabaseInstance | null = null
+
+export function getDefaultInstance(): DatabaseInstance {
+  if (!_defaultInstance) {
+    ensureDataDir()
+    _defaultInstance = createDatabaseInstance(getDefaultDbPath(), { seed: true })
+  }
+  return _defaultInstance
+}
+
+let _activeDb: Database.Database | null = null
+let _activeAuditLog: CreateAuditLogFn | null = null
+
+function getActiveDb(): Database.Database {
+  if (!_activeDb) {
+    _activeDb = getDefaultInstance().db
+    _activeAuditLog = getDefaultInstance().createAuditLog
+  }
+  return _activeDb
+}
+
+export function setActiveDatabase(instance: DatabaseInstance): void {
+  _activeDb = instance.db
+  _activeAuditLog = instance.createAuditLog
+}
+
+export function restoreDefaultDatabase(): void {
+  _activeDb = null
+  _activeAuditLog = null
+}
+
+export const createAuditLog: CreateAuditLogFn = (params) => {
+  if (!_activeAuditLog) {
+    getActiveDb()
+  }
+  return _activeAuditLog!(params)
+}
+
+const dbProxy = new Proxy({} as Database.Database, {
+  get(_target, prop) {
+    const db = getActiveDb()
+    const value = (db as any)[prop]
+    if (typeof value === 'function') {
+      return value.bind(db)
+    }
+    return value
+  },
+  set(_target, prop, value) {
+    const db = getActiveDb()
+    ;(db as any)[prop] = value
+    return true
+  },
+  has(_target, prop) {
+    const db = getActiveDb()
+    return prop in db
+  },
+})
+
+export default dbProxy

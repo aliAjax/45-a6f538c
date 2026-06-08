@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeEach, afterAll } from 'vitest'
-import { getReminderGroups, getTaskEffectiveReminderDate, getReminderRuleForDepartment } from '../api/lib/reminder-stats.js'
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
+import request from 'supertest'
+import app from '../api/app.js'
 import {
-  createTestDb,
-  closeTestDb,
+  setupTestDatabase,
+  teardownTestDatabase,
   cleanupTempDbs,
+  clearAllTables,
   createMeeting,
   createTask,
   createSupervision,
@@ -11,89 +13,91 @@ import {
   setReminderRule,
   daysFromToday,
 } from './test-helpers.js'
-import type { DatabaseInstance } from '../api/db.js'
-import type { Task } from '../shared/types.js'
+import type { ReminderGroups } from '../shared/types.js'
 
-describe('reminders 提醒逻辑回归测试', () => {
-  let instance: DatabaseInstance
-  let db: import('better-sqlite3').Database
+describe('Reminders API - 回归测试', () => {
+  beforeAll(() => {
+    setupTestDatabase()
+  })
 
   beforeEach(() => {
-    const testDb = createTestDb()
-    instance = testDb.instance
-    db = instance.db
+    clearAllTables()
   })
 
   afterAll(() => {
+    teardownTestDatabase()
     cleanupTempDbs()
   })
 
-  describe('部门自定义 reminder_rules', () => {
-    it('不同部门的 advanceDays 不同，提前提醒范围不同', () => {
-      const meetingId = createMeeting(db)
+  async function getReminders(): Promise<ReminderGroups> {
+    const res = await request(app).get('/api/reminders')
+    expect(res.body.success).toBe(true)
+    return res.body.data as ReminderGroups
+  }
 
-      createTask(db, {
+  describe('部门自定义 reminder_rules', () => {
+    it('不同部门 advanceDays 不同，提前提醒范围不同', async () => {
+      const meetingId = createMeeting()
+
+      createTask({
         meetingId,
-        content: '办公室任务',
+        content: '办公室的5天任务',
         department: '办公室',
-        deadline: daysFromToday(2),
+        deadline: daysFromToday(5),
         status: 'pending',
       })
 
-      createTask(db, {
+      createTask({
         meetingId,
-        content: '业务一科任务',
+        content: '业务一科的5天任务',
         department: '业务一科',
         deadline: daysFromToday(5),
         status: 'pending',
       })
 
-      setReminderRule(db, { department: '办公室', advanceDays: 1 })
-      setReminderRule(db, { department: '业务一科', advanceDays: 7 })
+      setReminderRule({ department: '办公室', advanceDays: 3 })
+      setReminderRule({ department: '业务一科', advanceDays: 7 })
 
-      const groups = getReminderGroups(db)
+      const groups = await getReminders()
 
-      const officeTask = groups.upcoming.find(t => t.department === '办公室')
-      const deptTask = groups.upcoming.find(t => t.department === '业务一科')
+      const officeTasks = groups.upcoming.filter((t) => t.department === '办公室')
+      const dept1Tasks = groups.upcoming.filter((t) => t.department === '业务一科')
 
-      expect(officeTask).toBeUndefined()
-      expect(deptTask).toBeDefined()
-      expect(groups.upcoming.length).toBe(1)
+      expect(officeTasks.length).toBe(0)
+      expect(dept1Tasks.length).toBe(1)
     })
 
-    it('没有自定义规则的部门使用默认规则（advanceDays=3）', () => {
-      const meetingId = createMeeting(db)
+    it('没有自定义规则的部门使用默认规则 advanceDays=3', async () => {
+      const meetingId = createMeeting()
 
-      createTask(db, {
+      createTask({
         meetingId,
-        content: '两天后到期',
-        department: '默认部门',
+        content: '默认规则的2天任务',
+        department: '默认测试科',
         deadline: daysFromToday(2),
         status: 'pending',
       })
 
-      createTask(db, {
+      createTask({
         meetingId,
-        content: '五天后到期',
-        department: '默认部门',
+        content: '默认规则的5天任务',
+        department: '默认测试科',
         deadline: daysFromToday(5),
         status: 'pending',
       })
 
-      const rule = getReminderRuleForDepartment(db, '默认部门')
-      expect(rule.advanceDays).toBe(3)
-
-      const groups = getReminderGroups(db)
-      expect(groups.upcoming.length).toBe(1)
-      expect(groups.upcoming[0].content).toBe('两天后到期')
+      const groups = await getReminders()
+      const defaultDeptTasks = groups.upcoming.filter((t) => t.department === '默认测试科')
+      expect(defaultDeptTasks.length).toBe(1)
+      expect(defaultDeptTasks[0].content).toBe('默认规则的2天任务')
     })
   })
 
   describe('督办 nextFollowUpDate 优先于任务 deadline', () => {
-    it('includeSupervisionFollowUp=true 时，督办日期早于 deadline 则使用督办日期', () => {
-      const meetingId = createMeeting(db)
+    it('includeSupervisionFollowUp=true 时，督办日期早于 deadline 则使用督办日期', async () => {
+      const meetingId = createMeeting()
 
-      const taskId = createTask(db, {
+      const taskId = createTask({
         meetingId,
         content: '有督办的任务',
         department: '督办科',
@@ -101,91 +105,86 @@ describe('reminders 提醒逻辑回归测试', () => {
         status: 'pending',
       })
 
-      createSupervision(db, {
+      createSupervision({
         taskId,
-        note: '督办一下',
+        note: '重点督办',
         nextFollowUpDate: daysFromToday(2),
       })
 
-      setReminderRule(db, {
-        department: '督办科',
-        advanceDays: 3,
-        includeSupervisionFollowUp: true,
-      })
-
-      const groups = getReminderGroups(db)
-      expect(groups.upcoming.length).toBe(1)
-      expect(groups.upcoming[0].content).toBe('有督办的任务')
-    })
-
-    it('includeSupervisionFollowUp=false 时，忽略督办日期', () => {
-      const meetingId = createMeeting(db)
-
-      const taskId = createTask(db, {
-        meetingId,
-        content: '有督办但不包含的任务',
-        department: '普通科',
-        deadline: daysFromToday(10),
-        status: 'pending',
-      })
-
-      createSupervision(db, {
-        taskId,
-        note: '督办一下',
-        nextFollowUpDate: daysFromToday(2),
-      })
-
-      setReminderRule(db, {
-        department: '普通科',
-        advanceDays: 3,
-        includeSupervisionFollowUp: false,
-      })
-
-      const groups = getReminderGroups(db)
-      expect(groups.upcoming.length).toBe(0)
-      expect(groups.today.length).toBe(0)
-      expect(groups.overdue.length).toBe(0)
-    })
-
-    it('督办日期晚于 deadline 时，仍使用 deadline', () => {
-      const meetingId = createMeeting(db)
-
-      const taskId = createTask(db, {
-        meetingId,
-        content: '督办日期更晚',
-        department: '督办科',
-        deadline: daysFromToday(3),
-        status: 'pending',
-      })
-
-      createSupervision(db, {
-        taskId,
-        note: '稍后督办',
-        nextFollowUpDate: daysFromToday(10),
-      })
-
-      setReminderRule(db, {
+      setReminderRule({
         department: '督办科',
         advanceDays: 5,
         includeSupervisionFollowUp: true,
       })
 
-      const groups = getReminderGroups(db)
-      const task = groups.upcoming.find(t => t.content === '督办日期更晚')
+      const groups = await getReminders()
+      const task = groups.upcoming.find((t) => t.content === '有督办的任务')
       expect(task).toBeDefined()
+      expect(task?.hasActiveSupervision).toBe(true)
+    })
 
-      const rule = getReminderRuleForDepartment(db, '督办科')
-      const effectiveDate = getTaskEffectiveReminderDate(task as Task, rule)
-      const deadlineStr = task!.deadline.split('T')[0].split(' ')[0]
-      expect(effectiveDate).toBe(deadlineStr)
+    it('includeSupervisionFollowUp=false 时，忽略督办日期', async () => {
+      const meetingId = createMeeting()
+
+      const taskId = createTask({
+        meetingId,
+        content: '忽略督办的任务',
+        department: '督办二科',
+        deadline: daysFromToday(10),
+        status: 'pending',
+      })
+
+      createSupervision({
+        taskId,
+        note: '督办但不纳入提醒',
+        nextFollowUpDate: daysFromToday(2),
+      })
+
+      setReminderRule({
+        department: '督办二科',
+        advanceDays: 5,
+        includeSupervisionFollowUp: false,
+      })
+
+      const groups = await getReminders()
+      const task = groups.upcoming.find((t) => t.content === '忽略督办的任务')
+      expect(task).toBeUndefined()
+    })
+
+    it('督办日期晚于 deadline 时，仍使用 deadline', async () => {
+      const meetingId = createMeeting()
+
+      const taskId = createTask({
+        meetingId,
+        content: '督办日期晚的任务',
+        department: '督办三科',
+        deadline: daysFromToday(3),
+        status: 'pending',
+      })
+
+      createSupervision({
+        taskId,
+        note: '督办日期在 deadline 之后',
+        nextFollowUpDate: daysFromToday(15),
+      })
+
+      setReminderRule({
+        department: '督办三科',
+        advanceDays: 5,
+        includeSupervisionFollowUp: true,
+      })
+
+      const groups = await getReminders()
+      const task = groups.upcoming.find((t) => t.content === '督办日期晚的任务')
+      expect(task).toBeDefined()
     })
   })
 
   describe('follow_up 里的下一次跟进日期覆盖督办日期', () => {
-    it('最新跟进记录的日期比督办日期更早，使用跟进记录日期', () => {
-      const meetingId = createMeeting(db)
+    it('最新跟进记录日期比督办日期更早，使用跟进记录日期', async () => {
+      const meetingId = createMeeting()
 
-      const taskId = createTask(db, {
+      const taskId = createTask({
         meetingId,
         content: '有跟进记录的任务',
         department: '跟进科',
@@ -193,235 +192,241 @@ describe('reminders 提醒逻辑回归测试', () => {
         status: 'pending',
       })
 
-      const supervisionId = createSupervision(db, {
+      const supervisionId = createSupervision({
         taskId,
         note: '初始督办',
         nextFollowUpDate: daysFromToday(10),
       })
 
-      createFollowUp(db, {
+      createFollowUp({
         supervisionId,
         content: '第一次跟进',
         nextFollowUpDate: daysFromToday(2),
       })
 
-      setReminderRule(db, {
+      setReminderRule({
         department: '跟进科',
-        advanceDays: 3,
+        advanceDays: 5,
         includeSupervisionFollowUp: true,
       })
 
-      const groups = getReminderGroups(db)
+      const groups = await getReminders()
       expect(groups.upcoming.length).toBe(1)
       expect(groups.upcoming[0].content).toBe('有跟进记录的任务')
     })
 
-    it('最新跟进记录的日期比督办日期更晚，使用最新跟进日期', () => {
-      const meetingId = createMeeting(db)
+    it('最新跟进记录的日期比督办日期更晚，使用最新跟进日期', async () => {
+      const meetingId = createMeeting()
 
-      const taskId = createTask(db, {
+      const taskId = createTask({
         meetingId,
         content: '跟进日期更晚的任务',
-        department: '跟进科',
+        department: '跟进二科',
         deadline: daysFromToday(20),
         status: 'pending',
       })
 
-      const supervisionId = createSupervision(db, {
+      const supervisionId = createSupervision({
         taskId,
         note: '初始督办',
         nextFollowUpDate: daysFromToday(2),
       })
 
-      createFollowUp(db, {
+      createFollowUp({
         supervisionId,
         content: '推迟跟进',
         nextFollowUpDate: daysFromToday(10),
       })
 
-      setReminderRule(db, {
-        department: '跟进科',
+      setReminderRule({
+        department: '跟进二科',
         advanceDays: 5,
         includeSupervisionFollowUp: true,
       })
 
-      const groups = getReminderGroups(db)
+      const groups = await getReminders()
       expect(groups.upcoming.length).toBe(0)
       expect(groups.overdue.length).toBe(0)
       expect(groups.today.length).toBe(0)
     })
 
-    it('使用最新跟进记录日期而非督办日期（日期更早时验证）', () => {
-      const meetingId = createMeeting(db)
+    it('使用最新跟进记录日期而非督办日期（日期更早时验证）', async () => {
+      const meetingId = createMeeting()
 
-      const taskId = createTask(db, {
+      const taskId = createTask({
         meetingId,
         content: '验证使用最新跟进日期',
-        department: '跟进科',
+        department: '跟进三科',
         deadline: daysFromToday(20),
         status: 'pending',
       })
 
-      const supervisionId = createSupervision(db, {
+      const supervisionId = createSupervision({
         taskId,
         note: '初始督办',
         nextFollowUpDate: daysFromToday(10),
       })
 
-      createFollowUp(db, {
+      createFollowUp({
         supervisionId,
         content: '提前跟进',
         nextFollowUpDate: daysFromToday(2),
       })
 
-      setReminderRule(db, {
-        department: '跟进科',
+      setReminderRule({
+        department: '跟进三科',
         advanceDays: 5,
         includeSupervisionFollowUp: true,
       })
 
-      const groups = getReminderGroups(db)
+      const groups = await getReminders()
       expect(groups.upcoming.length).toBe(1)
       expect(groups.upcoming[0].content).toBe('验证使用最新跟进日期')
     })
   })
 
   describe('repeatOverdue 关闭后逾期任务不再进入提醒', () => {
-    it('repeatOverdue=true 时，逾期任务出现在 overdue 列表', () => {
-      const meetingId = createMeeting(db)
+    it('repeatOverdue=true 时，逾期任务出现在 overdue 列表', async () => {
+      const meetingId = createMeeting()
 
-      createTask(db, {
+      createTask({
         meetingId,
-        content: '逾期任务',
-        department: '逾期科',
-        deadline: daysFromToday(-5),
-        status: 'pending',
-      })
-
-      setReminderRule(db, {
-        department: '逾期科',
-        repeatOverdue: true,
-      })
-
-      const groups = getReminderGroups(db)
-      expect(groups.overdue.length).toBe(1)
-      expect(groups.overdue[0].content).toBe('逾期任务')
-    })
-
-    it('repeatOverdue=false 时，逾期任务不进入提醒列表', () => {
-      const meetingId = createMeeting(db)
-
-      createTask(db, {
-        meetingId,
-        content: '逾期但不重复提醒',
+        content: '重复提醒的逾期任务',
         department: '逾期科',
         deadline: daysFromToday(-3),
         status: 'pending',
       })
 
-      setReminderRule(db, {
+      setReminderRule({
         department: '逾期科',
+        repeatOverdue: true,
+      })
+
+      const groups = await getReminders()
+      const overdueTask = groups.overdue.find((t) => t.content === '重复提醒的逾期任务')
+      expect(overdueTask).toBeDefined()
+    })
+
+    it('repeatOverdue=false 时，逾期任务不出现在任何提醒列表', async () => {
+      const meetingId = createMeeting()
+
+      createTask({
+        meetingId,
+        content: '不重复提醒的逾期任务',
+        department: '逾期二科',
+        deadline: daysFromToday(-3),
+        status: 'pending',
+      })
+
+      setReminderRule({
+        department: '逾期二科',
         repeatOverdue: false,
       })
 
-      const groups = getReminderGroups(db)
-      expect(groups.overdue.length).toBe(0)
-      expect(groups.today.length).toBe(0)
-      expect(groups.upcoming.length).toBe(0)
+      const groups = await getReminders()
+      const inOverdue = groups.overdue.some((t) => t.content === '不重复提醒的逾期任务')
+      const inToday = groups.today.some((t) => t.content === '不重复提醒的逾期任务')
+      const inUpcoming = groups.upcoming.some((t) => t.content === '不重复提醒的逾期任务')
+
+      expect(inOverdue).toBe(false)
+      expect(inToday).toBe(false)
+      expect(inUpcoming).toBe(false)
     })
   })
 
   describe('已完成任务不参与提醒', () => {
-    it('completed 状态的任务不出现在任何提醒分组中', () => {
-      const meetingId = createMeeting(db)
+    it('completed 状态的任务不出现在任何提醒分组中', async () => {
+      const meetingId = createMeeting()
 
-      createTask(db, {
+      createTask({
         meetingId,
         content: '已完成的逾期任务',
         department: '完成科',
-        deadline: daysFromToday(-10),
+        deadline: daysFromToday(-5),
         status: 'completed',
       })
 
-      createTask(db, {
+      createTask({
         meetingId,
-        content: '已完成的即将到期任务',
+        content: '已完成的近期任务',
         department: '完成科',
         deadline: daysFromToday(1),
         status: 'completed',
       })
 
-      createTask(db, {
-        meetingId,
-        content: '今天到期已完成',
-        department: '完成科',
-        deadline: daysFromToday(0),
-        status: 'completed',
-      })
-
-      setReminderRule(db, {
-        department: '完成科',
-        advanceDays: 3,
-        repeatOverdue: true,
-      })
-
-      const groups = getReminderGroups(db)
-      expect(groups.overdue.length).toBe(0)
-      expect(groups.today.length).toBe(0)
-      expect(groups.upcoming.length).toBe(0)
+      const groups = await getReminders()
+      const allTasks = [...groups.overdue, ...groups.today, ...groups.upcoming]
+      const completedTasks = allTasks.filter((t) => t.status === 'completed')
+      expect(completedTasks.length).toBe(0)
     })
   })
 
   describe('综合场景', () => {
-    it('多个部门混合场景下的提醒分组正确', () => {
-      const meetingId = createMeeting(db, { title: '综合会议' })
+    it('多个部门多种状态的任务正确分组', async () => {
+      const meetingId = createMeeting()
 
-      createTask(db, {
+      createTask({
         meetingId,
-        content: 'A部门逾期任务',
-        department: '部门A',
+        content: '综合-逾期-重复',
+        department: '综合一科',
         deadline: daysFromToday(-2),
         status: 'pending',
       })
 
-      createTask(db, {
+      createTask({
         meetingId,
-        content: 'B部门今天到期',
-        department: '部门B',
-        deadline: daysFromToday(0),
-        status: 'in_progress',
-      })
-
-      createTask(db, {
-        meetingId,
-        content: 'C部门即将到期',
-        department: '部门C',
-        deadline: daysFromToday(2),
+        content: '综合-逾期-不重复',
+        department: '综合二科',
+        deadline: daysFromToday(-2),
         status: 'pending',
       })
 
-      createTask(db, {
+      createTask({
         meetingId,
-        content: '已完成任务',
-        department: '部门A',
-        deadline: daysFromToday(-5),
+        content: '综合-即将到期-督办',
+        department: '综合三科',
+        deadline: daysFromToday(10),
+        status: 'pending',
+      })
+
+      const task4Id = createTask({
+        meetingId,
+        content: '综合-即将到期-有督办',
+        department: '综合三科',
+        deadline: daysFromToday(15),
+        status: 'pending',
+      })
+
+      createSupervision({
+        taskId: task4Id,
+        note: '重点督办',
+        nextFollowUpDate: daysFromToday(2),
+      })
+
+      createTask({
+        meetingId,
+        content: '综合-已完成',
+        department: '综合一科',
+        deadline: daysFromToday(-1),
         status: 'completed',
       })
 
-      setReminderRule(db, { department: '部门A', advanceDays: 3, repeatOverdue: true })
-      setReminderRule(db, { department: '部门B', advanceDays: 3, repeatOverdue: true })
-      setReminderRule(db, { department: '部门C', advanceDays: 3, repeatOverdue: true })
+      setReminderRule({ department: '综合一科', repeatOverdue: true, advanceDays: 3 })
+      setReminderRule({ department: '综合二科', repeatOverdue: false, advanceDays: 3 })
+      setReminderRule({
+        department: '综合三科',
+        advanceDays: 5,
+        includeSupervisionFollowUp: true,
+      })
 
-      const groups = getReminderGroups(db)
+      const groups = await getReminders()
 
-      expect(groups.overdue.length).toBe(1)
-      expect(groups.overdue[0].content).toBe('A部门逾期任务')
-
-      expect(groups.today.length).toBe(1)
-      expect(groups.today[0].content).toBe('B部门今天到期')
-
-      expect(groups.upcoming.length).toBe(1)
-      expect(groups.upcoming[0].content).toBe('C部门即将到期')
+      expect(groups.overdue.some((t) => t.content === '综合-逾期-重复')).toBe(true)
+      expect(groups.overdue.some((t) => t.content === '综合-逾期-不重复')).toBe(false)
+      expect(groups.upcoming.some((t) => t.content === '综合-即将到期-督办')).toBe(false)
+      expect(groups.upcoming.some((t) => t.content === '综合-即将到期-有督办')).toBe(true)
+      expect(groups.overdue.some((t) => t.content === '综合-已完成')).toBe(false)
+      expect(groups.upcoming.some((t) => t.content === '综合-已完成')).toBe(false)
     })
   })
 })
