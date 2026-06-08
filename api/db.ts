@@ -1,25 +1,31 @@
 import Database from 'better-sqlite3'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import fs from 'fs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const dbPath = path.join(__dirname, '..', 'data', 'meeting.db')
+export type CreateAuditLogFn = (params: {
+  entityType: string
+  entityId: number
+  actionType: string
+  fieldName?: string | null
+  oldValue?: unknown
+  newValue?: unknown
+  sourcePage?: string | null
+  taskId?: number | null
+  meetingId?: number | null
+  department?: string | null
+  createdAt?: string | null
+}) => number
 
-import fs from 'fs'
-
-const dataDir = path.join(__dirname, '..', 'data')
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true })
+export interface DatabaseInstance {
+  db: Database.Database
+  createAuditLog: CreateAuditLogFn
 }
 
-const db = new Database(dbPath)
-
-db.pragma('journal_mode = WAL')
-db.pragma('foreign_keys = ON')
-
-function initDatabase() {
+function initDatabaseSchema(db: Database.Database) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS meetings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -206,7 +212,18 @@ function initDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_reminder_rules_department ON reminder_rules(department);
   `)
+}
 
+function runMigrations(db: Database.Database) {
+  migrateTaskProgress(db)
+  migrateSupervisionFollowUps(db)
+  migrateTemplateVersions(db)
+  migrateTaskViewsTargetPage(db)
+  migrateAuditLogsFromProgress(db)
+  fixAuditLogNullCreatedAt(db)
+}
+
+function seedInitialData(db: Database.Database) {
   const meetingCount = db.prepare('SELECT COUNT(*) as count FROM meetings').get() as { count: number }
   if (meetingCount.count === 0) {
     const insertMeeting = db.prepare(`
@@ -352,30 +369,79 @@ function initDatabase() {
       }
     })
   }
-
-  migrateTaskProgress()
-  migrateSupervisionFollowUps()
-  migrateTemplateVersions()
-  migrateTaskViewsTargetPage()
-  migrateAuditLogsFromProgress()
-  fixAuditLogNullCreatedAt()
 }
 
-function migrateTaskViewsTargetPage() {
-  const columns = db.prepare(`
-    PRAGMA table_info(task_views)
-  `).all() as Array<{ name: string }>
+function migrateTaskProgress(db: Database.Database) {
+  const tasksWithoutProgress = db.prepare(`
+    SELECT t.id, t.status, t.progress, t.created_at
+    FROM tasks t
+    WHERE NOT EXISTS (
+      SELECT 1 FROM task_progress tp WHERE tp.task_id = t.id
+    )
+  `).all() as Array<{
+    id: number
+    status: string
+    progress: string | null
+    created_at: string
+  }>
 
-  const hasTargetPage = columns.some((col) => col.name === 'target_page')
-
-  if (!hasTargetPage) {
-    db.exec(`
-      ALTER TABLE task_views ADD COLUMN target_page TEXT NOT NULL DEFAULT 'tasks';
+  if (tasksWithoutProgress.length > 0) {
+    const insertProgress = db.prepare(`
+      INSERT INTO task_progress (task_id, status, progress, created_at)
+      VALUES (?, ?, ?, ?)
     `)
+
+    const transaction = db.transaction((tasks: typeof tasksWithoutProgress) => {
+      for (const task of tasks) {
+        insertProgress.run(
+          task.id,
+          task.status,
+          task.progress || '',
+          task.created_at
+        )
+      }
+    })
+
+    transaction(tasksWithoutProgress)
   }
 }
 
-function migrateTemplateVersions() {
+function migrateSupervisionFollowUps(db: Database.Database) {
+  const supervisionsWithoutFollowUps = db.prepare(`
+    SELECT s.id, s.note, s.next_follow_up_date, s.created_at
+    FROM task_supervisions s
+    WHERE NOT EXISTS (
+      SELECT 1 FROM supervision_follow_ups f WHERE f.supervision_id = s.id
+    )
+  `).all() as Array<{
+    id: number
+    note: string
+    next_follow_up_date: string | null
+    created_at: string
+  }>
+
+  if (supervisionsWithoutFollowUps.length > 0) {
+    const insertFollowUp = db.prepare(`
+      INSERT INTO supervision_follow_ups (supervision_id, content, next_follow_up_date, created_at)
+      VALUES (?, ?, ?, ?)
+    `)
+
+    const transaction = db.transaction((supervisions: typeof supervisionsWithoutFollowUps) => {
+      for (const supervision of supervisions) {
+        insertFollowUp.run(
+          supervision.id,
+          supervision.note || '',
+          supervision.next_follow_up_date,
+          supervision.created_at
+        )
+      }
+    })
+
+    transaction(supervisionsWithoutFollowUps)
+  }
+}
+
+function migrateTemplateVersions(db: Database.Database) {
   const templatesWithoutVersions = db.prepare(`
     SELECT mt.id, mt.title, mt.departments, mt.created_at
     FROM meeting_templates mt
@@ -436,77 +502,21 @@ function migrateTemplateVersions() {
   transaction(templatesWithoutVersions)
 }
 
-function migrateTaskProgress() {
-  const tasksWithoutProgress = db.prepare(`
-    SELECT t.id, t.status, t.progress, t.created_at
-    FROM tasks t
-    WHERE NOT EXISTS (
-      SELECT 1 FROM task_progress tp WHERE tp.task_id = t.id
-    )
-  `).all() as Array<{
-    id: number
-    status: string
-    progress: string | null
-    created_at: string
-  }>
+function migrateTaskViewsTargetPage(db: Database.Database) {
+  const columns = db.prepare(`
+    PRAGMA table_info(task_views)
+  `).all() as Array<{ name: string }>
 
-  if (tasksWithoutProgress.length > 0) {
-    const insertProgress = db.prepare(`
-      INSERT INTO task_progress (task_id, status, progress, created_at)
-      VALUES (?, ?, ?, ?)
+  const hasTargetPage = columns.some((col) => col.name === 'target_page')
+
+  if (!hasTargetPage) {
+    db.exec(`
+      ALTER TABLE task_views ADD COLUMN target_page TEXT NOT NULL DEFAULT 'tasks';
     `)
-
-    const transaction = db.transaction((tasks: typeof tasksWithoutProgress) => {
-      for (const task of tasks) {
-        insertProgress.run(
-          task.id,
-          task.status,
-          task.progress || '',
-          task.created_at
-        )
-      }
-    })
-
-    transaction(tasksWithoutProgress)
   }
 }
 
-function migrateSupervisionFollowUps() {
-  const supervisionsWithoutFollowUps = db.prepare(`
-    SELECT s.id, s.note, s.next_follow_up_date, s.created_at
-    FROM task_supervisions s
-    WHERE NOT EXISTS (
-      SELECT 1 FROM supervision_follow_ups f WHERE f.supervision_id = s.id
-    )
-  `).all() as Array<{
-    id: number
-    note: string
-    next_follow_up_date: string | null
-    created_at: string
-  }>
-
-  if (supervisionsWithoutFollowUps.length > 0) {
-    const insertFollowUp = db.prepare(`
-      INSERT INTO supervision_follow_ups (supervision_id, content, next_follow_up_date, created_at)
-      VALUES (?, ?, ?, ?)
-    `)
-
-    const transaction = db.transaction((supervisions: typeof supervisionsWithoutFollowUps) => {
-      for (const supervision of supervisions) {
-        insertFollowUp.run(
-          supervision.id,
-          supervision.note || '',
-          supervision.next_follow_up_date,
-          supervision.created_at
-        )
-      }
-    })
-
-    transaction(supervisionsWithoutFollowUps)
-  }
-}
-
-function migrateAuditLogsFromProgress() {
+function migrateAuditLogsFromProgress(db: Database.Database) {
   const auditCount = db.prepare('SELECT COUNT(*) as count FROM audit_logs').get() as { count: number }
   if (auditCount.count > 0) {
     return
@@ -576,19 +586,39 @@ function migrateAuditLogsFromProgress() {
   transaction(progressRows)
 }
 
-export function createAuditLog(params: {
-  entityType: string
-  entityId: number
-  actionType: string
-  fieldName?: string | null
-  oldValue?: unknown
-  newValue?: unknown
-  sourcePage?: string | null
-  taskId?: number | null
-  meetingId?: number | null
-  department?: string | null
-  createdAt?: string | null
-}) {
+function fixAuditLogNullCreatedAt(db: Database.Database) {
+  const nullCountRow = db.prepare(`
+    SELECT COUNT(*) as count FROM audit_logs 
+    WHERE created_at IS NULL OR created_at = ''
+  `).get() as { count: number }
+
+  if (nullCountRow.count > 0) {
+    console.log(`[DB] 发现 ${nullCountRow.count} 条 audit_logs 记录 created_at 为空，正在修复...`)
+    const result = db.prepare(`
+      UPDATE audit_logs 
+      SET created_at = datetime('now', 'localtime')
+      WHERE created_at IS NULL OR created_at = ''
+    `).run()
+    console.log(`[DB] 已修复 ${result.changes} 条记录`)
+  }
+}
+
+function createAuditLogWithDb(
+  db: Database.Database,
+  params: {
+    entityType: string
+    entityId: number
+    actionType: string
+    fieldName?: string | null
+    oldValue?: unknown
+    newValue?: unknown
+    sourcePage?: string | null
+    taskId?: number | null
+    meetingId?: number | null
+    department?: string | null
+    createdAt?: string | null
+  }
+) {
   const fields: string[] = [
     'entity_type', 'entity_id', 'action_type', 'field_name',
     'old_value', 'new_value', 'source_page', 'task_id', 'meeting_id', 'department'
@@ -631,23 +661,36 @@ export function createAuditLog(params: {
   return Number(result.lastInsertRowid)
 }
 
-function fixAuditLogNullCreatedAt() {
-  const nullCountRow = db.prepare(`
-    SELECT COUNT(*) as count FROM audit_logs 
-    WHERE created_at IS NULL OR created_at = ''
-  `).get() as { count: number }
+export function createDatabaseInstance(dbPath: string, options: { seed?: boolean } = {}): DatabaseInstance {
+  const db = new Database(dbPath)
 
-  if (nullCountRow.count > 0) {
-    console.log(`[DB] 发现 ${nullCountRow.count} 条 audit_logs 记录 created_at 为空，正在修复...`)
-    const result = db.prepare(`
-      UPDATE audit_logs 
-      SET created_at = datetime('now', 'localtime')
-      WHERE created_at IS NULL OR created_at = ''
-    `).run()
-    console.log(`[DB] 已修复 ${result.changes} 条记录`)
+  db.pragma('journal_mode = WAL')
+  db.pragma('foreign_keys = ON')
+
+  initDatabaseSchema(db)
+  runMigrations(db)
+
+  if (options.seed) {
+    seedInitialData(db)
+  }
+
+  const createAuditLogBound: CreateAuditLogFn = (params) =>
+    createAuditLogWithDb(db, params)
+
+  return {
+    db,
+    createAuditLog: createAuditLogBound,
   }
 }
 
-initDatabase()
+const defaultDbPath = path.join(__dirname, '..', 'data', 'meeting.db')
 
-export default db
+const dataDir = path.join(__dirname, '..', 'data')
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true })
+}
+
+const { db: defaultDb, createAuditLog: defaultCreateAuditLog } = createDatabaseInstance(defaultDbPath, { seed: true })
+
+export default defaultDb
+export { defaultCreateAuditLog as createAuditLog }
